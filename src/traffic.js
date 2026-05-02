@@ -16,6 +16,10 @@ class TrafficManager {
     this._spawnTimer = 0;
     this._elapsed    = 0;
     this.isRushHour  = false;
+    this.smoothScore = 100;   // exponential moving average of flowScore
+    this.pressure    = 0;     // 0 (calm) → 1 (gridlock), drives the pressure bar
+    this._prevGrade  = 'A';
+    this.gradeChanged = false;
   }
 
   update(dt) {
@@ -25,6 +29,23 @@ class TrafficManager {
     this._spawnCars(dt);
     this._updateCars(dt);
     this._updateCongestion();
+    this._updateScore(dt);
+  }
+
+  _updateScore(dt) {
+    const raw = this.flowScore();
+    if (raw !== null) {
+      // Slow EMA — takes ~30s to fully react so grade feels earned
+      this.smoothScore = lerp(this.smoothScore, raw, clamp(dt * 0.04, 0, 1));
+    }
+    // Pressure: congestion load + rush hour adds a spike
+    const basePressure = 1 - this.smoothScore / 100;
+    const rushSpike    = this.isRushHour ? 0.22 : 0;
+    this.pressure = clamp(lerp(this.pressure, basePressure + rushSpike, clamp(dt * 0.5, 0, 1)), 0, 1);
+
+    const g = this.grade();
+    this.gradeChanged = g !== this._prevGrade;
+    this._prevGrade   = g;
   }
 
   _updateRushHour() {
@@ -76,6 +97,15 @@ class TrafficManager {
     if (!edges.length) return null;
     const avg = edges.reduce((s, e) => s + e.congestion, 0) / edges.length;
     return Math.round((1 - avg) * 100);
+  }
+
+  grade() {
+    const s = this.smoothScore;
+    if (s >= 85) return 'A';
+    if (s >= 70) return 'B';
+    if (s >= 50) return 'C';
+    if (s >= 30) return 'D';
+    return 'F';
   }
 
   timeUntilRush() {
