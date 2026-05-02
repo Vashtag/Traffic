@@ -11,6 +11,7 @@ class Game {
     this.renderer = new Renderer(this.canvas, this.camera);
     this.graph    = new RoadGraph();
     this.traffic  = new TrafficManager(this.graph);
+    this.audio    = new AudioManager();
 
     this.tool         = 'road';
     this.gridSnap     = false;
@@ -83,6 +84,11 @@ class Game {
       e.currentTarget.textContent = this.paused ? '▶️' : '⏸️';
     });
 
+    document.getElementById('muteBtn').addEventListener('click', e => {
+      const muted = this.audio.toggleMute();
+      e.currentTarget.textContent = muted ? '🔇' : '🔊';
+    });
+
     this._setHint();
   }
 
@@ -107,6 +113,7 @@ class Game {
     if (!this.paused) {
       this._elapsed += dt;
       this.traffic.update(dt);
+      this.audio.tick(this.traffic);
     }
 
     // Day/night: 0-1 over DAY_CYCLE seconds
@@ -262,6 +269,7 @@ class Game {
     const a = this.graph.addNode(this._drawStart.x, this._drawStart.y);
     const b = this.graph.addNode(pos.x, pos.y);
     this.graph.addEdge(a, b);
+    this.audio.playClick();
     this._drawStart = { ...pos };
   }
 
@@ -271,6 +279,7 @@ class Game {
     if      (type === 'light')      this.traffic.addTrafficLight(hit.node);
     else if (type === 'stop')       this.traffic.addStopSign(hit.node);
     else if (type === 'roundabout') this.traffic.addRoundabout(hit.node);
+    this.audio.playPlop();
   }
 
   _handleOneWayTap(world) {
