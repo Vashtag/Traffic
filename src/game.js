@@ -26,8 +26,9 @@ class Game {
     this._deleteHeld   = false;
     this._deletedIds   = new Set();
 
-    this._elapsed  = 0;   // total seconds, drives day/night
-    this.buildings = this._generateBuildings();
+    this._elapsed    = 0;
+    this._minimapRect = null;
+    this.buildings   = this._generateBuildings();
 
     this._setupUI();
     this._input = new InputHandler(this.canvas, this);
@@ -132,6 +133,12 @@ class Game {
       this.renderer.drawZonePreview(this._mouseWorld, ZONE_RADIUS, this.zoneType);
     }
 
+    // Minimap drawn last so it's always on top (resets transform internally)
+    this._minimapRect = this.renderer.drawMinimap(
+      this.graph.allEdges(), this.graph.allNodes(), this.traffic.cars,
+      this.camera, window.innerWidth, window.innerHeight
+    );
+
     this._updateStats();
     requestAnimationFrame(t => this._loop(t));
   }
@@ -159,7 +166,13 @@ class Game {
     return { x: (pos.x - this.camera.x) / this.camera.zoom, y: (pos.y - this.camera.y) / this.camera.zoom };
   }
 
+  _inMinimap(pos) {
+    const m = this._minimapRect;
+    return m && pos.x >= m.x && pos.x <= m.x + m.w && pos.y >= m.y && pos.y <= m.y + m.h;
+  }
+
   handleDown(pos) {
+    if (this._inMinimap(pos)) return; // let handleUp do the jump
     this._downPos      = pos;
     this._isDragging   = false;
     this._dragStart    = pos;
@@ -193,6 +206,14 @@ class Game {
     this._isDragging  = false;
     this._downPos     = null;
     this._deleteHeld  = false;
+
+    // Minimap tap → jump camera to that world position
+    if (this._inMinimap(pos)) {
+      const world = this._minimapRect.toWorld(pos.x, pos.y);
+      this.camera.x = window.innerWidth  / 2 - world.x * this.camera.zoom;
+      this.camera.y = window.innerHeight / 2 - world.y * this.camera.zoom;
+      return;
+    }
 
     if (this.tool === 'delete') return;
     if (wasDragging) return;

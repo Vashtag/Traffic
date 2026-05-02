@@ -320,6 +320,80 @@ class Renderer {
     }
   }
 
+  // Returns { x, y, w, h, toWorld } so game.js can detect taps and convert coords
+  drawMinimap(edges, nodes, cars, camera, screenW, screenH) {
+    const { ctx } = this;
+    const dpr = devicePixelRatio;
+    const MW = 155, MH = 105, MARGIN = 14;
+
+    // Top-right corner (avoids bottom toolbar)
+    const mx = screenW - MW - MARGIN;
+    const my = MARGIN + 50; // below the stats bar
+
+    // World bounds — fallback to a default view when no roads placed yet
+    let minX = -250, maxX = 250, minY = -200, maxY = 200;
+    if (nodes.length > 0) {
+      minX = nodes.reduce((m, n) => Math.min(m, n.x), Infinity)  - 60;
+      maxX = nodes.reduce((m, n) => Math.max(m, n.x), -Infinity) + 60;
+      minY = nodes.reduce((m, n) => Math.min(m, n.y), Infinity)  - 60;
+      maxY = nodes.reduce((m, n) => Math.max(m, n.y), -Infinity) + 60;
+    }
+    const worldW = maxX - minX || 1, worldH = maxY - minY || 1;
+    const scale  = Math.min(MW / worldW, MH / worldH);
+
+    // Center world content inside the minimap rect
+    const ox = mx + (MW - worldW * scale) / 2 - minX * scale;
+    const oy = my + (MH - worldH * scale) / 2 - minY * scale;
+    const toMini  = (wx, wy) => ({ x: wx * scale + ox, y: wy * scale + oy });
+    const toWorld = (sx, sy) => ({ x: (sx - ox) / scale, y: (sy - oy) / scale });
+
+    // Draw in screen-pixel space
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Background + border
+    ctx.beginPath(); ctx.roundRect(mx - 1, my - 1, MW + 2, MH + 2, 7);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(mx, my, MW, MH, 6);
+    ctx.fillStyle = 'rgba(8,12,24,0.88)'; ctx.fill();
+
+    // Clip to minimap area
+    ctx.beginPath(); ctx.roundRect(mx, my, MW, MH, 6); ctx.clip();
+
+    // Roads
+    ctx.lineWidth = e => e.lanes === 2 ? 2.5 : 1.5;
+    ctx.lineCap = 'round';
+    for (const e of edges) {
+      const a = toMini(e.a.x, e.a.y), b = toMini(e.b.x, e.b.y);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = lerpColor('#2a5c38', '#a93226', e.congestion);
+      ctx.lineWidth   = e.lanes === 2 ? 2.5 : 1.5;
+      ctx.stroke();
+    }
+
+    // Cars as tiny dots
+    for (const car of cars) {
+      if (!car.alive) continue;
+      const p = toMini(car.x, car.y);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fill();
+    }
+
+    // Camera viewport box
+    const vL = toMini(-camera.x / camera.zoom, -camera.y / camera.zoom);
+    const vR = toMini((-camera.x + screenW) / camera.zoom, (-camera.y + screenH) / camera.zoom);
+    const vW = vR.x - vL.x, vH = vR.y - vL.y;
+    ctx.fillStyle   = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(vL.x, vL.y, vW, vH);
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth   = 1;
+    ctx.strokeRect(vL.x, vL.y, vW, vH);
+
+    ctx.restore();
+
+    return { x: mx, y: my, w: MW, h: MH, toWorld };
+  }
+
   drawZonePreview(pos, radius, type) {
     const { ctx } = this;
     const color = type === 'slow' ? '255,80,80' : '80,160,255';
