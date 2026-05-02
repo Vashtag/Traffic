@@ -32,6 +32,7 @@ class Car {
     this._stopTimer  = 0;
     this._stopNodeId = -1;
     this.stuckTime   = 0;
+    this.opacity     = 0;
     this._spawn();
   }
 
@@ -108,6 +109,7 @@ class Car {
     this.speed = lerp(this.speed, targetSpeed, Math.min(1, dt * 6));
     if (this.speed < 2) { this.waiting += dt; this.stuckTime += dt; }
     else                  this.stuckTime = 0;
+    if (this.opacity < 1) this.opacity = Math.min(1, this.opacity + dt * 3);
 
     this.t += (this.speed * dt) / edgeLen;
 

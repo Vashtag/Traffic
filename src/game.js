@@ -141,9 +141,13 @@ class Game {
 
     // Previews
     if (this.tool === 'road' && this._drawStart) {
-      const snap = this.gridSnap ? snapToGrid(this._mouseWorld.x, this._mouseWorld.y) : this._mouseWorld;
-      this.renderer.drawPreviewEdge(this._drawStart, snap);
-      this.renderer.drawPreviewNode(snap);
+      // Snap to nearby existing node if within 22px world-space
+      const raw       = this.gridSnap ? snapToGrid(this._mouseWorld.x, this._mouseWorld.y) : this._mouseWorld;
+      const nearNode  = this.graph.allNodes().find(n => dist(n, raw) < 22);
+      const snapPoint = nearNode ? { x: nearNode.x, y: nearNode.y } : raw;
+      this.renderer.drawPreviewEdge(this._drawStart, snapPoint);
+      if (nearNode) this.renderer.drawSnapHint(nearNode);
+      else          this.renderer.drawPreviewNode(snapPoint);
     }
     if (this.tool === 'zone') {
       this.renderer.drawZonePreview(this._mouseWorld, ZONE_RADIUS, this.zoneType);
@@ -323,14 +327,18 @@ class Game {
   }
 
   _handleRoadTap(pos) {
-    if (!this._drawStart) { this._drawStart = { ...pos }; return; }
-    if (dist(this._drawStart, pos) < 10) { this._drawStart = null; return; }
+    // Snap endpoint to a nearby existing node
+    const nearNode = this.graph.allNodes().find(n => dist(n, pos) < 22);
+    const snapped  = nearNode ? { x: nearNode.x, y: nearNode.y } : pos;
+
+    if (!this._drawStart) { this._drawStart = { ...snapped }; return; }
+    if (dist(this._drawStart, snapped) < 10) { this._drawStart = null; return; }
     const a    = this.graph.addNode(this._drawStart.x, this._drawStart.y);
-    const b    = this.graph.addNode(pos.x, pos.y);
+    const b    = this.graph.addNode(snapped.x, snapped.y);
     const edge = this.graph.addEdge(a, b);
     if (edge) this._pushUndo({ type: 'edge_add', edgeId: edge.id });
     this.audio.playClick();
-    this._drawStart = { ...pos };
+    this._drawStart = { ...snapped };
   }
 
   _handleControlTap(world, type) {
