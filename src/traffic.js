@@ -1,21 +1,21 @@
-const LIGHT_CYCLE   = 8;
-const TARGET_CARS   = 10;
-const MAX_CARS      = 28;
+const LIGHT_CYCLE    = 8;
+const TARGET_CARS    = 10;
+const MAX_CARS       = 28;
 const SPAWN_INTERVAL = 2.5;
-
-// Rush hour: after RUSH_START seconds, car count spikes for RUSH_DURATION seconds, then cycles
-const RUSH_START    = 45;
-const RUSH_DURATION = 40;
-const RUSH_CYCLE    = 120;
+const RUSH_START     = 45;
+const RUSH_DURATION  = 40;
+const RUSH_CYCLE     = 120;
 
 class TrafficManager {
   constructor(graph) {
-    this.graph = graph;
-    this.cars  = [];
-    this._nextCarId   = 0;
-    this._spawnTimer  = 0;
-    this._elapsed     = 0;
-    this.isRushHour   = false;
+    this.graph  = graph;
+    this.cars   = [];
+    this.zones  = [];   // { id, x, y, radius, type: 'slow'|'fast' }
+    this._nextCarId  = 0;
+    this._nextZoneId = 0;
+    this._spawnTimer = 0;
+    this._elapsed    = 0;
+    this.isRushHour  = false;
   }
 
   update(dt) {
@@ -47,14 +47,11 @@ class TrafficManager {
   _spawnCars(dt) {
     const nodes = this.graph.allNodes();
     if (nodes.length < 2) return;
-
     this._spawnTimer += dt;
     const interval = this.isRushHour ? SPAWN_INTERVAL * 0.5 : SPAWN_INTERVAL;
     if (this._spawnTimer < interval) return;
     this._spawnTimer = 0;
-
     this.cars = this.cars.filter(c => c.alive);
-
     const target = this.isRushHour ? MAX_CARS : TARGET_CARS;
     if (this.cars.length < target) {
       const car = new Car(this._nextCarId++, this.graph);
@@ -63,13 +60,13 @@ class TrafficManager {
   }
 
   _updateCars(dt) {
-    for (const car of this.cars) car.update(dt, this.cars);
+    for (const car of this.cars) car.update(dt, this.cars, this.zones);
   }
 
   _updateCongestion() {
     for (const edge of this.graph.allEdges()) {
       const count    = this.cars.filter(c => c.alive && c.edge?.id === edge.id).length;
-      const capacity = Math.max(1, edge.length / MIN_GAP);
+      const capacity = Math.max(1, (edge.length / MIN_GAP) * edge.lanes);
       edge.congestion = lerp(edge.congestion, clamp(count / capacity, 0, 1), 0.08);
     }
   }
@@ -81,28 +78,24 @@ class TrafficManager {
     return Math.round((1 - avg) * 100);
   }
 
-  rushProgress() {
-    if (!this.isRushHour) return 0;
-    const phase = this._elapsed % RUSH_CYCLE;
-    return (phase - RUSH_START) / RUSH_DURATION;
-  }
-
   timeUntilRush() {
     const phase = this._elapsed % RUSH_CYCLE;
     if (this.isRushHour) return 0;
-    if (phase < RUSH_START) return Math.ceil(RUSH_START - phase);
-    return Math.ceil(RUSH_CYCLE - phase + RUSH_START);
+    return phase < RUSH_START ? Math.ceil(RUSH_START - phase) : Math.ceil(RUSH_CYCLE - phase + RUSH_START);
   }
 
-  addTrafficLight(node) {
-    node.control = { type: 'light', state: 'green', timer: 0 };
+  addTrafficLight(node) { node.control = { type: 'light', state: 'green', timer: 0 }; }
+  addStopSign(node)     { node.control = { type: 'stop' }; }
+  addRoundabout(node)   { node.control = { type: 'roundabout' }; }
+
+  addZone(x, y, radius, type) {
+    const zone = { id: this._nextZoneId++, x, y, radius, type };
+    this.zones.push(zone);
+    return zone;
   }
 
-  addStopSign(node) {
-    node.control = { type: 'stop' };
-  }
-
-  addRoundabout(node) {
-    node.control = { type: 'roundabout' };
+  removeZoneAt(x, y) {
+    const idx = this.zones.findIndex(z => dist(z, {x,y}) < z.radius);
+    if (idx !== -1) this.zones.splice(idx, 1);
   }
 }
