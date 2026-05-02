@@ -144,22 +144,43 @@ class Game {
   }
 
   _updateStats() {
-    const alive  = this.traffic.cars.filter(c => c.alive).length;
+    const alive = this.traffic.cars.filter(c => c.alive).length;
     document.getElementById('carCount').textContent = `Cars: ${alive}`;
 
-    const score  = this.traffic.flowScore();
-    const flowEl = document.getElementById('flowScore');
-    if (score === null) { flowEl.textContent = 'Flow: –'; flowEl.style.color = '#aaa'; }
-    else { flowEl.textContent = `Flow: ${score}%`; flowEl.style.color = score > 60 ? '#2ecc71' : score > 30 ? '#f39c12' : '#e74c3c'; }
+    // Grade
+    const grade      = this.traffic.grade();
+    const score      = Math.round(this.traffic.smoothScore);
+    const gradeColor = { A: '#2ecc71', B: '#27ae60', C: '#f39c12', D: '#e67e22', F: '#e74c3c' }[grade];
+    const letterEl   = document.getElementById('gradeLetter');
+    letterEl.textContent  = this.graph.allEdges().length ? grade : '–';
+    letterEl.style.color  = gradeColor;
+    document.getElementById('gradeScore').textContent = this.graph.allEdges().length ? `${score}%` : '';
 
+    if (this.traffic.gradeChanged && this.graph.allEdges().length) {
+      letterEl.style.animation = 'none';
+      letterEl.offsetHeight;   // reflow to restart
+      letterEl.style.animation = 'gradebump 0.3s ease-out forwards';
+    }
+
+    // Pressure bar
+    const pct  = Math.round(this.traffic.pressure * 100);
+    const fill = document.getElementById('pressureFill');
+    fill.style.width      = pct + '%';
+    fill.style.background = pct < 35
+      ? `linear-gradient(90deg,#27ae60,#2ecc71)`
+      : pct < 65
+      ? `linear-gradient(90deg,#e67e22,#f39c12)`
+      : `linear-gradient(90deg,#c0392b,#e74c3c)`;
+
+    // Rush hour
     const rushEl = document.getElementById('rushIndicator');
     if (this.traffic.isRushHour) { rushEl.textContent = '🚨 Rush Hour!'; rushEl.style.opacity = '1'; }
     else { rushEl.textContent = `Rush in ${this.traffic.timeUntilRush()}s`; rushEl.style.opacity = '0.45'; }
 
-    // Day/night label
+    // Time of day
     const t = this.renderer.dayTime;
-    const phase = t < 0.25 ? 'Night' : t < 0.35 ? 'Dawn' : t < 0.65 ? 'Day' : t < 0.80 ? 'Dusk' : 'Night';
-    document.getElementById('timeOfDay').textContent = phase;
+    document.getElementById('timeOfDay').textContent =
+      t < 0.25 ? 'Night' : t < 0.35 ? 'Dawn' : t < 0.65 ? 'Day' : t < 0.80 ? 'Dusk' : 'Night';
   }
 
   screenToWorld(pos) {
