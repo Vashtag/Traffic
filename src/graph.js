@@ -75,4 +75,30 @@ class RoadGraph {
 
   allNodes() { return this.nodes; }
   allEdges() { return this.edges; }
+
+  // Bypass snap/dedup checks — used only by the save/load system
+  loadData({ nodes, edges }) {
+    this.nodes = [];
+    this.edges = [];
+    const map  = {};
+
+    for (const [id, x, y] of nodes) {
+      const node = { id, x, y, control: null };
+      this.nodes.push(node);
+      map[id] = node;
+    }
+    this._nextNodeId = nodes.length ? Math.max(...nodes.map(n => n[0])) + 1 : 0;
+
+    for (const [id, aId, bId, ow, lanes] of edges) {
+      const a = map[aId], b = map[bId];
+      if (!a || !b) continue;
+      const edge = { id, a, b, length: dist(a, b), congestion: 0,
+        oneWay: ow === 1 ? 'ab' : ow === 2 ? 'ba' : null,
+        lanes:  lanes || 1 };
+      this.edges.push(edge);
+    }
+    this._nextEdgeId = edges.length ? Math.max(...edges.map(e => e[0])) + 1 : 0;
+
+    return map; // node id → node object, needed to restore controls
+  }
 }
