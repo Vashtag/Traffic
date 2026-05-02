@@ -22,16 +22,19 @@ class RoadGraph {
     );
     if (existing) return existing;
     const length = dist(nodeA, nodeB);
-    // oneWay: null = bidirectional, 'ab' = a→b only, 'ba' = b→a only
-    const edge = { id: this._nextEdgeId++, a: nodeA, b: nodeB, length, congestion: 0, oneWay: null };
+    const edge = { id: this._nextEdgeId++, a: nodeA, b: nodeB, length, congestion: 0, oneWay: null, lanes: 1 };
     this.edges.push(edge);
     return edge;
   }
 
   cycleOneWay(edge) {
-    if (!edge.oneWay)        edge.oneWay = 'ab';
+    if (!edge.oneWay)            edge.oneWay = 'ab';
     else if (edge.oneWay === 'ab') edge.oneWay = 'ba';
-    else                     edge.oneWay = null;
+    else                         edge.oneWay = null;
+  }
+
+  upgradeLanes(edge) {
+    edge.lanes = edge.lanes === 1 ? 2 : 1;
   }
 
   removeEdge(edge) {
@@ -47,11 +50,9 @@ class RoadGraph {
   _pruneOrphans() {
     const used = new Set();
     this.edges.forEach(e => { used.add(e.a.id); used.add(e.b.id); });
-    // Keep nodes that are still connected or are roundabout centers
     this.nodes = this.nodes.filter(n => used.has(n.id));
   }
 
-  // Returns traversable neighbors respecting one-way direction
   neighbors(node) {
     const result = [];
     for (const e of this.edges) {
