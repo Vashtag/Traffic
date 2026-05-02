@@ -85,8 +85,13 @@ class TrafficManager {
   }
 
   _updateCongestion() {
+    // O(cars + edges) — build count map in one pass instead of filtering per edge
+    const counts = new Map();
+    for (const car of this.cars) {
+      if (car.alive && car.edge) counts.set(car.edge.id, (counts.get(car.edge.id) || 0) + 1);
+    }
     for (const edge of this.graph.allEdges()) {
-      const count    = this.cars.filter(c => c.alive && c.edge?.id === edge.id).length;
+      const count    = counts.get(edge.id) || 0;
       const capacity = Math.max(1, (edge.length / MIN_GAP) * edge.lanes);
       edge.congestion = lerp(edge.congestion, clamp(count / capacity, 0, 1), 0.08);
     }

@@ -74,15 +74,29 @@ class Renderer {
     ctx.restore();
   }
 
+  // World-space bounding box of the current viewport (with padding for thick strokes)
+  _viewBounds(pad = 60) {
+    const cam = this.camera;
+    const W   = this.canvas.width  / devicePixelRatio;
+    const H   = this.canvas.height / devicePixelRatio;
+    return {
+      left:   -cam.x / cam.zoom - pad,
+      top:    -cam.y / cam.zoom - pad,
+      right:  (-cam.x + W) / cam.zoom + pad,
+      bottom: (-cam.y + H) / cam.zoom + pad,
+    };
+  }
+
   drawBuildings(buildings) {
     const { ctx } = this;
-    const a = this._skyAmbient ?? 0.1;
+    const a  = this._skyAmbient ?? 0.1;
+    const vb = this._viewBounds(0);
     for (const b of buildings) {
-      ctx.fillStyle = `rgba(255,255,255,${a * b.shade})`;
+      if (b.x + b.w < vb.left || b.x > vb.right || b.y + b.h < vb.top || b.y > vb.bottom) continue;
+      ctx.fillStyle   = `rgba(255,255,255,${a * b.shade})`;
       ctx.fillRect(b.x, b.y, b.w, b.h);
-      // Roof edge
       ctx.strokeStyle = `rgba(255,255,255,${a * b.shade * 1.6})`;
-      ctx.lineWidth = 0.8;
+      ctx.lineWidth   = 0.8;
       ctx.strokeRect(b.x, b.y, b.w, b.h);
     }
   }
@@ -110,41 +124,67 @@ class Renderer {
 
   drawEdges(edges) {
     const { ctx } = this;
+    const vb = this._viewBounds();
     ctx.lineCap = 'round';
-    for (const e of edges) {
-      const rw         = e.lanes === 2 ? ROAD_WIDTH_2 : ROAD_WIDTH;
-      const congColor  = lerpColor('#3a7d4f', '#c0392b', e.congestion);
 
-      // Shadow
+    // Cull to viewport
+    const vis = edges.filter(e =>
+      !(Math.min(e.a.x,e.b.x) > vb.right  || Math.max(e.a.x,e.b.x) < vb.left ||
+        Math.min(e.a.y,e.b.y) > vb.bottom || Math.max(e.a.y,e.b.y) < vb.top)
+    );
+    if (!vis.length) return;
+
+    // Collect junction points (deduped) to fill seams between angled roads
+    const junctions = new Map();
+    for (const e of vis) {
+      const rw = e.lanes === 2 ? ROAD_WIDTH_2 : ROAD_WIDTH;
+      for (const n of [e.a, e.b]) {
+        const ex = junctions.get(n.id);
+        if (!ex || rw > ex.rw) junctions.set(n.id, { x: n.x, y: n.y, rw, cong: e.congestion });
+      }
+    }
+
+    // Pass 1: shadows
+    for (const e of vis) {
+      const rw = e.lanes === 2 ? ROAD_WIDTH_2 : ROAD_WIDTH;
       ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
       ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = rw + 4; ctx.stroke();
-      // Asphalt
+    }
+
+    // Pass 2: asphalt base
+    for (const e of vis) {
+      const rw = e.lanes === 2 ? ROAD_WIDTH_2 : ROAD_WIDTH;
       ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
       ctx.strokeStyle = '#2c2c3e'; ctx.lineWidth = rw; ctx.stroke();
-      // Congestion overlay
+    }
+
+    // Pass 3: junction fills — seal the seams where roads meet at angles
+    for (const [, j] of junctions) {
+      ctx.beginPath(); ctx.arc(j.x, j.y, j.rw / 2 + 1, 0, Math.PI * 2);
+      ctx.fillStyle = '#2c2c3e'; ctx.fill();
+    }
+
+    // Pass 4: congestion overlays + markings + arrows
+    for (const e of vis) {
+      const rw        = e.lanes === 2 ? ROAD_WIDTH_2 : ROAD_WIDTH;
+      const congColor = lerpColor('#3a7d4f', '#c0392b', e.congestion);
+
       ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
       ctx.strokeStyle = congColor; ctx.lineWidth = rw;
       ctx.globalAlpha = 0.45 + e.congestion * 0.45; ctx.stroke(); ctx.globalAlpha = 1;
 
       if (e.lanes === 2) {
-        // Two lane dividers
         for (const offset of [-rw * 0.22, rw * 0.22]) {
-          const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
-          const len = Math.hypot(dx, dy) || 1;
+          const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, len = Math.hypot(dx, dy) || 1;
           const px = (-dy / len) * offset, py = (dx / len) * offset;
           ctx.beginPath();
-          ctx.moveTo(e.a.x + px, e.a.y + py);
-          ctx.lineTo(e.b.x + px, e.b.y + py);
-          ctx.strokeStyle = 'rgba(255,255,200,0.12)';
-          ctx.lineWidth   = 1;
+          ctx.moveTo(e.a.x + px, e.a.y + py); ctx.lineTo(e.b.x + px, e.b.y + py);
+          ctx.strokeStyle = 'rgba(255,255,200,0.12)'; ctx.lineWidth = 1;
           ctx.setLineDash([10, 14]); ctx.stroke(); ctx.setLineDash([]);
         }
-        // Solid center line
         ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
-        ctx.strokeStyle = 'rgba(255,255,180,0.22)'; ctx.lineWidth = 1.5;
-        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,180,0.22)'; ctx.lineWidth = 1.5; ctx.stroke();
       } else {
-        // Single center dash
         ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
         ctx.strokeStyle = 'rgba(255,255,200,0.18)'; ctx.lineWidth = 1.5;
         ctx.setLineDash([10, 14]); ctx.stroke(); ctx.setLineDash([]);
@@ -174,13 +214,12 @@ class Renderer {
 
   drawNodes(nodes) {
     const { ctx } = this;
+    const vb = this._viewBounds();
     for (const n of nodes) {
+      if (n.x < vb.left || n.x > vb.right || n.y < vb.top || n.y > vb.bottom) continue;
+      // Plain nodes are visually covered by junction fills in drawEdges;
+      // only draw nodes that have a control overlay
       if (n.control) this._drawControl(n);
-      else {
-        ctx.beginPath(); ctx.arc(n.x, n.y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = '#2c2c3e'; ctx.fill();
-        ctx.strokeStyle = '#555'; ctx.lineWidth = 1.5; ctx.stroke();
-      }
     }
   }
 
@@ -230,10 +269,13 @@ class Renderer {
 
   drawCars(cars) {
     const { ctx } = this;
+    const vb = this._viewBounds(20);
     for (const car of cars) {
       if (!car.alive) continue;
+      if (car.x < vb.left || car.x > vb.right || car.y < vb.top || car.y > vb.bottom) continue;
       const W = car.w, H = car.h;
       ctx.save();
+      ctx.globalAlpha = car.opacity ?? 1;
       ctx.translate(car.x, car.y); ctx.rotate(car.angle);
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
       ctx.beginPath(); ctx.ellipse(1, 1, W/2, H/2, 0, 0, Math.PI*2); ctx.fill();
@@ -244,6 +286,7 @@ class Renderer {
       ctx.fillStyle = '#fffde7';
       ctx.fillRect(W/2-2, -H/2+0.5, 2, 1.5);
       ctx.fillRect(W/2-2,  H/2-2,   2, 1.5);
+      ctx.globalAlpha = 1;
       ctx.restore();
     }
   }
@@ -262,17 +305,28 @@ class Renderer {
     ctx.strokeStyle = 'rgba(100,180,255,0.9)'; ctx.lineWidth = 2; ctx.stroke();
   }
 
+  // Highlight an existing node the player is about to snap to while drawing
+  drawSnapHint(node) {
+    const { ctx } = this;
+    ctx.beginPath(); ctx.arc(node.x, node.y, 12, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(100,220,255,0.9)'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(node.x, node.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(100,220,255,0.6)'; ctx.fill();
+  }
+
   // Congestion alert bubbles over jammed roads + stuck-car steam
   drawAlerts(edges, cars, time) {
     const { ctx } = this;
     const THRESHOLD = 0.62;
+    const vb = this._viewBounds();
 
     // --- Edge congestion bubbles ---
     for (const e of edges) {
       if (e.congestion < THRESHOLD) continue;
-      const severity = (e.congestion - THRESHOLD) / (1 - THRESHOLD); // 0-1
       const mx = (e.a.x + e.b.x) / 2;
       const my = (e.a.y + e.b.y) / 2 - 18;
+      if (mx < vb.left || mx > vb.right || my < vb.top || my > vb.bottom) continue;
+      const severity = (e.congestion - THRESHOLD) / (1 - THRESHOLD);
 
       const pulse = 1 + 0.18 * Math.sin(time * 3.5 + e.id);
       const r     = (10 + severity * 5) * pulse;
@@ -388,6 +442,14 @@ class Renderer {
     ctx.strokeStyle = 'rgba(255,255,255,0.55)';
     ctx.lineWidth   = 1;
     ctx.strokeRect(vL.x, vL.y, vW, vH);
+
+    // Stats badge — road count and live car count
+    const liveCars = cars.filter(c => c.alive).length;
+    ctx.fillStyle    = 'rgba(255,255,255,0.45)';
+    ctx.font         = '9px sans-serif';
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`${edges.length} roads · ${liveCars} cars`, mx + 5, my + MH - 4);
 
     ctx.restore();
 

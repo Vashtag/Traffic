@@ -76,6 +76,23 @@ class RoadGraph {
   allNodes() { return this.nodes; }
   allEdges() { return this.edges; }
 
+  // Re-insert a node with its exact saved ID (undo / load)
+  _ensureNode(id, x, y) {
+    const existing = this.nodes.find(n => n.id === id);
+    if (existing) return existing;
+    const node = { id, x, y, control: null };
+    this.nodes.push(node);
+    return node;
+  }
+
+  // Re-insert an edge with exact saved properties (undo / load)
+  _restoreEdge(id, nodeA, nodeB, oneWay, lanes) {
+    const edge = { id, a: nodeA, b: nodeB, length: dist(nodeA, nodeB),
+      congestion: 0, oneWay, lanes };
+    this.edges.push(edge);
+    return edge;
+  }
+
   // Bypass snap/dedup checks — used only by the save/load system
   loadData({ nodes, edges }) {
     this.nodes = [];
