@@ -31,6 +31,7 @@ class Car {
     this.h        = 5  + Math.random() * 2;
     this._stopTimer  = 0;
     this._stopNodeId = -1;
+    this.stuckTime   = 0;
     this._spawn();
   }
 
@@ -105,7 +106,8 @@ class Car {
 
     const targetSpeed = mustStop ? 0 : this.maxSpeed * speedMult;
     this.speed = lerp(this.speed, targetSpeed, Math.min(1, dt * 6));
-    if (this.speed < 2) this.waiting += dt;
+    if (this.speed < 2) { this.waiting += dt; this.stuckTime += dt; }
+    else                  this.stuckTime = 0;
 
     this.t += (this.speed * dt) / edgeLen;
 
