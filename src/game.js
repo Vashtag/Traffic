@@ -1,8 +1,13 @@
 const ZOOM_MIN    = 0.2, ZOOM_MAX = 4;
-const DAY_CYCLE   = 180;   // seconds for full day/night cycle
-const ZONE_RADIUS = 60;    // default speed zone radius
+const DAY_CYCLE   = 180;
+const ZONE_RADIUS = 60;
 const BUILDING_WORLD = 2400;
 const BUILDING_BLOCK = 120;
+
+const COSTS  = { road: 8, light: 600, stop: 200, roundabout: 1000, upgrade: 1200, zone: 400, oneway: 100 };
+const INCOME = { A: 350, B: 240, C: 140, D: 55, F: 15 };
+const REFUND_ROAD = 0.40;
+const REFUND_CTRL = 0.60;
 
 class Game {
   constructor() {
@@ -14,10 +19,12 @@ class Game {
     this.audio    = new AudioManager();
     this.heatmap  = new HeatmapManager();
 
+    this.budget       = 8000;
+
     this.tool         = 'road';
     this.gridSnap     = false;
     this.paused       = false;
-    this.zoneType     = 'slow';   // current zone tool subtype
+    this.zoneType     = 'slow';
 
     this._drawStart    = null;
     this._mouseWorld   = { x: 0, y: 0 };
@@ -107,16 +114,31 @@ class Game {
     this._setHint();
   }
 
+  _incomeRate() {
+    const rate = INCOME[this.traffic.grade()] ?? 15;
+    return this.traffic.isRushHour ? rate * 1.6 : rate;
+  }
+
+  _canAfford(cost) {
+    if (this.budget >= cost) return true;
+    this._showToast(`💸 Need $${Math.ceil(cost - this.budget).toLocaleString()} more`);
+    const el = document.getElementById('budget');
+    el.classList.remove('budget-shake');
+    void el.offsetWidth;
+    el.classList.add('budget-shake');
+    return false;
+  }
+
   _setHint() {
     const hints = {
       road:       'Tap to start a road, tap again to extend. Tap same point to stop.',
-      light:      'Tap an intersection to place a traffic light.',
-      stop:       'Tap an intersection to place a stop sign.',
-      roundabout: 'Tap an intersection to convert it to a roundabout.',
-      oneway:     'Tap a road to cycle: two-way → one-way → reverse → two-way.',
-      upgrade:    'Tap a road to toggle single-lane / two-lane.',
-      zone:       'Tap to place a speed zone. Toggle 🐢/🚀 to switch type.',
-      delete:     'Tap or drag to erase roads and controls.',
+      light:      `Tap an intersection to place a traffic light. ($${COSTS.light.toLocaleString()})`,
+      stop:       `Tap an intersection to place a stop sign. ($${COSTS.stop.toLocaleString()})`,
+      roundabout: `Tap an intersection to convert it to a roundabout. ($${COSTS.roundabout.toLocaleString()})`,
+      oneway:     `Tap a road to cycle: two-way → one-way → reverse. ($${COSTS.oneway}/step)`,
+      upgrade:    `Tap a road to upgrade to two-lane. ($${COSTS.upgrade.toLocaleString()})`,
+      zone:       `Tap to place a speed zone. ($${COSTS.zone.toLocaleString()}) Toggle 🐢/🚀 to switch type.`,
+      delete:     'Tap or drag to erase roads and controls (40–60% refund).',
     };
     document.getElementById('hint').textContent = hints[this.tool] || '';
   }
@@ -127,6 +149,7 @@ class Game {
 
     if (!this.paused) {
       this._elapsed += dt;
+      this.budget   += this._incomeRate() * dt;
       this.traffic.update(dt);
       this.audio.tick(this.traffic);
       this.heatmap.update(this.traffic.cars, dt);
@@ -149,13 +172,16 @@ class Game {
 
     // Previews
     if (this.tool === 'road' && this._drawStart) {
-      // Snap to nearby existing node if within 22px world-space
       const raw       = this.gridSnap ? snapToGrid(this._mouseWorld.x, this._mouseWorld.y) : this._mouseWorld;
       const nearNode  = this.graph.allNodes().find(n => dist(n, raw) < 22);
       const snapPoint = nearNode ? { x: nearNode.x, y: nearNode.y } : raw;
       this.renderer.drawPreviewEdge(this._drawStart, snapPoint);
       if (nearNode) this.renderer.drawSnapHint(nearNode);
       else          this.renderer.drawPreviewNode(snapPoint);
+      const previewCost = Math.round(dist(this._drawStart, snapPoint) * COSTS.road);
+      const canPay = this.budget >= previewCost;
+      document.getElementById('hint').textContent =
+        `Road: $${previewCost.toLocaleString()} — ${canPay ? 'tap to place' : '⚠️ not enough funds'}`;
     }
     if (this.tool === 'zone') {
       this.renderer.drawZonePreview(this._mouseWorld, ZONE_RADIUS, this.zoneType);
@@ -209,6 +235,13 @@ class Game {
     const t = this.renderer.dayTime;
     document.getElementById('timeOfDay').textContent =
       t < 0.25 ? 'Night' : t < 0.35 ? 'Dawn' : t < 0.65 ? 'Day' : t < 0.80 ? 'Dusk' : 'Night';
+
+    // Budget
+    document.getElementById('budget').textContent = `$${Math.floor(this.budget).toLocaleString()}`;
+    const rateEl = document.getElementById('incomeRate');
+    const rate = Math.round(this._incomeRate());
+    rateEl.textContent = `+$${rate}/s`;
+    rateEl.style.color = this.traffic.isRushHour ? '#f1c40f' : '#2ecc71';
   }
 
   screenToWorld(pos) {
@@ -331,20 +364,27 @@ class Game {
       this.traffic.zones.push(record.zone);
     }
 
+    if (record.budgetDelta) this.budget -= record.budgetDelta;
     this._showToast('↩ Undone');
   }
 
   _handleRoadTap(pos) {
-    // Snap endpoint to a nearby existing node
     const nearNode = this.graph.allNodes().find(n => dist(n, pos) < 22);
     const snapped  = nearNode ? { x: nearNode.x, y: nearNode.y } : pos;
 
     if (!this._drawStart) { this._drawStart = { ...snapped }; return; }
     if (dist(this._drawStart, snapped) < 10) { this._drawStart = null; return; }
+
+    const cost = Math.round(dist(this._drawStart, snapped) * COSTS.road);
+    if (!this._canAfford(cost)) return;
+
     const a    = this.graph.addNode(this._drawStart.x, this._drawStart.y);
     const b    = this.graph.addNode(snapped.x, snapped.y);
     const edge = this.graph.addEdge(a, b);
-    if (edge) this._pushUndo({ type: 'edge_add', edgeId: edge.id });
+    if (edge) {
+      this.budget -= cost;
+      this._pushUndo({ type: 'edge_add', edgeId: edge.id, budgetDelta: -cost });
+    }
     this.audio.playClick();
     this._drawStart = { ...snapped };
   }
@@ -352,7 +392,13 @@ class Game {
   _handleControlTap(world, type) {
     const hit = this.graph.hitTest(world.x, world.y, 22);
     if (!hit || hit.type !== 'node') return;
-    this._pushUndo({ type: 'control', nodeId: hit.node.id, prev: hit.node.control });
+    // Only charge when adding a new control (not replacing existing)
+    const isNew = !hit.node.control;
+    const costKey = type === 'light' ? 'light' : type === 'stop' ? 'stop' : 'roundabout';
+    const cost = isNew ? COSTS[costKey] : 0;
+    if (cost && !this._canAfford(cost)) return;
+    if (cost) this.budget -= cost;
+    this._pushUndo({ type: 'control', nodeId: hit.node.id, prev: hit.node.control, budgetDelta: -cost });
     if      (type === 'light')      this.traffic.addTrafficLight(hit.node);
     else if (type === 'stop')       this.traffic.addStopSign(hit.node);
     else if (type === 'roundabout') this.traffic.addRoundabout(hit.node);
@@ -362,7 +408,9 @@ class Game {
   _handleOneWayTap(world) {
     const hit = this.graph.hitTest(world.x, world.y, 22);
     if (!hit || hit.type !== 'edge') return;
-    this._pushUndo({ type: 'oneway', edgeId: hit.edge.id, prev: hit.edge.oneWay });
+    if (!this._canAfford(COSTS.oneway)) return;
+    this.budget -= COSTS.oneway;
+    this._pushUndo({ type: 'oneway', edgeId: hit.edge.id, prev: hit.edge.oneWay, budgetDelta: -COSTS.oneway });
     this.graph.cycleOneWay(hit.edge);
     this.traffic.cars.forEach(c => { if (c.edge?.id === hit.edge.id) c.alive = false; });
   }
@@ -370,18 +418,26 @@ class Game {
   _handleUpgradeTap(world) {
     const hit = this.graph.hitTest(world.x, world.y, 22);
     if (!hit || hit.type !== 'edge') return;
-    this._pushUndo({ type: 'lanes', edgeId: hit.edge.id, prev: hit.edge.lanes });
+    const isUpgrade = (hit.edge.lanes || 1) === 1;
+    const cost = isUpgrade ? COSTS.upgrade : 0;
+    if (cost && !this._canAfford(cost)) return;
+    if (cost) this.budget -= cost;
+    this._pushUndo({ type: 'lanes', edgeId: hit.edge.id, prev: hit.edge.lanes, budgetDelta: -cost });
     this.graph.upgradeLanes(hit.edge);
   }
 
   _handleZoneTap(world) {
     const existing = this.traffic.zones.find(z => dist(z, world) < z.radius && z.type === this.zoneType);
     if (existing) {
-      this._pushUndo({ type: 'zone_del', zone: { ...existing } });
+      const refund = Math.round(COSTS.zone * REFUND_CTRL);
+      this.budget += refund;
+      this._pushUndo({ type: 'zone_del', zone: { ...existing }, budgetDelta: refund });
       this.traffic.zones.splice(this.traffic.zones.indexOf(existing), 1);
     } else {
+      if (!this._canAfford(COSTS.zone)) return;
+      this.budget -= COSTS.zone;
       const zone = this.traffic.addZone(world.x, world.y, ZONE_RADIUS, this.zoneType);
-      this._pushUndo({ type: 'zone_add', zoneId: zone.id });
+      this._pushUndo({ type: 'zone_add', zoneId: zone.id, budgetDelta: -COSTS.zone });
     }
   }
 
@@ -390,23 +446,31 @@ class Game {
     if (!hit) {
       const zone = this.traffic.zones.find(z => dist(z, world) < z.radius);
       if (zone) {
-        this._pushUndo({ type: 'zone_del', zone: { ...zone } });
+        const refund = Math.round(COSTS.zone * REFUND_CTRL);
+        this.budget += refund;
+        this._pushUndo({ type: 'zone_del', zone: { ...zone }, budgetDelta: refund });
         this.traffic.removeZoneAt(world.x, world.y);
       }
       return;
     }
     if (hit.type === 'edge' && !this._deletedIds.has(hit.edge.id)) {
       const e = hit.edge;
+      const refund = Math.round(e.length * COSTS.road * REFUND_ROAD);
+      this.budget += refund;
       this._pushUndo({
         type: 'edge_del', eId: e.id, ow: e.oneWay, lanes: e.lanes,
         nA: { id: e.a.id, x: e.a.x, y: e.a.y, ctrl: e.a.control },
         nB: { id: e.b.id, x: e.b.x, y: e.b.y, ctrl: e.b.control },
+        budgetDelta: refund,
       });
       this._deletedIds.add(e.id);
       this.traffic.cars.forEach(c => { if (c.edge?.id === e.id) c.alive = false; });
       this.graph.removeEdge(e);
     } else if (hit.type === 'node' && hit.node.control) {
-      this._pushUndo({ type: 'control', nodeId: hit.node.id, prev: hit.node.control });
+      const ctrlCost = COSTS[hit.node.control.type] ?? 0;
+      const refund = Math.round(ctrlCost * REFUND_CTRL);
+      this.budget += refund;
+      this._pushUndo({ type: 'control', nodeId: hit.node.id, prev: hit.node.control, budgetDelta: refund });
       this.graph.removeControl(hit.node.id);
     }
   }
