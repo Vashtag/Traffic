@@ -70,6 +70,7 @@ body {
 }
 
 #flowScore { color: #aaa; }
+#rushIndicator { color: #e74c3c; font-weight: 600; transition: opacity 0.5s; }
 
 #hint {
   position: fixed;
