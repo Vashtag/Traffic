@@ -1,3 +1,5 @@
+const ROAD_WIDTH = 12;
+
 class Renderer {
   constructor(canvas, camera) {
     this.canvas = canvas;
@@ -6,9 +8,9 @@ class Renderer {
   }
 
   resize() {
-    this.canvas.width = window.innerWidth * devicePixelRatio;
+    this.canvas.width  = window.innerWidth  * devicePixelRatio;
     this.canvas.height = window.innerHeight * devicePixelRatio;
-    this.canvas.style.width = window.innerWidth + 'px';
+    this.canvas.style.width  = window.innerWidth  + 'px';
     this.canvas.style.height = window.innerHeight + 'px';
   }
 
@@ -20,9 +22,8 @@ class Renderer {
   }
 
   applyCamera() {
-    const { ctx } = this;
     const cam = this.camera;
-    ctx.setTransform(
+    this.ctx.setTransform(
       cam.zoom * devicePixelRatio, 0,
       0, cam.zoom * devicePixelRatio,
       cam.x * devicePixelRatio,
@@ -33,21 +34,18 @@ class Renderer {
   drawGrid(gridSize) {
     const { ctx, canvas, camera } = this;
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 1 / camera.zoom;
 
-    const left = -camera.x / camera.zoom;
-    const top  = -camera.y / camera.zoom;
-    const right = left + canvas.width / camera.zoom / devicePixelRatio;
+    const left  = -camera.x / camera.zoom;
+    const top   = -camera.y / camera.zoom;
+    const right = left + canvas.width  / camera.zoom / devicePixelRatio;
     const bot   = top  + canvas.height / camera.zoom / devicePixelRatio;
 
-    const startX = Math.floor(left / gridSize) * gridSize;
-    const startY = Math.floor(top  / gridSize) * gridSize;
-
-    for (let x = startX; x < right; x += gridSize) {
+    for (let x = Math.floor(left / gridSize) * gridSize; x < right; x += gridSize) {
       ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bot); ctx.stroke();
     }
-    for (let y = startY; y < bot; y += gridSize) {
+    for (let y = Math.floor(top / gridSize) * gridSize; y < bot; y += gridSize) {
       ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
     }
     ctx.restore();
@@ -55,31 +53,40 @@ class Renderer {
 
   drawEdges(edges) {
     const { ctx } = this;
+    ctx.lineCap = 'round';
+
     for (const e of edges) {
-      const color = lerpColor('#2ecc71', '#e74c3c', e.congestion);
-      const baseW = 8;
-      // Road shadow
+      const congColor = lerpColor('#3a7d4f', '#c0392b', e.congestion);
+
+      // Shadow
       ctx.beginPath();
-      ctx.moveTo(e.a.x, e.a.y);
-      ctx.lineTo(e.b.x, e.b.y);
-      ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-      ctx.lineWidth = baseW + 3;
-      ctx.lineCap = 'round';
+      ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = ROAD_WIDTH + 4;
       ctx.stroke();
-      // Road surface
+
+      // Asphalt base (dark)
       ctx.beginPath();
-      ctx.moveTo(e.a.x, e.a.y);
-      ctx.lineTo(e.b.x, e.b.y);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = baseW;
+      ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
+      ctx.strokeStyle = '#2c2c3e';
+      ctx.lineWidth = ROAD_WIDTH;
       ctx.stroke();
+
+      // Congestion overlay
+      ctx.beginPath();
+      ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
+      ctx.strokeStyle = congColor;
+      ctx.lineWidth = ROAD_WIDTH;
+      ctx.globalAlpha = 0.45 + e.congestion * 0.45;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
       // Center dashes
       ctx.beginPath();
-      ctx.moveTo(e.a.x, e.a.y);
-      ctx.lineTo(e.b.x, e.b.y);
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
+      ctx.strokeStyle = 'rgba(255,255,200,0.18)';
       ctx.lineWidth = 1.5;
-      ctx.setLineDash([10, 12]);
+      ctx.setLineDash([10, 14]);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -91,10 +98,14 @@ class Renderer {
       if (n.control) {
         this._drawControl(n);
       } else {
+        // Intersection dot
         ctx.beginPath();
-        ctx.arc(n.x, n.y, 5, 0, Math.PI*2);
-        ctx.fillStyle = '#aaa';
+        ctx.arc(n.x, n.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#2c2c3e';
         ctx.fill();
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
       }
     }
   }
@@ -107,44 +118,68 @@ class Renderer {
 
     if (ctrl.type === 'light') {
       const color = ctrl.state === 'green' ? '#2ecc71' : '#e74c3c';
-      ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI*2);
-      ctx.fillStyle = '#111'; ctx.fill();
-      ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI*2);
-      ctx.fillStyle = color; ctx.fill();
-      // Glow
-      ctx.shadowColor = color; ctx.shadowBlur = 10;
-      ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI*2);
+      // Housing
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2);
+      ctx.fillStyle = '#1a1a2e'; ctx.fill();
+      ctx.strokeStyle = '#555'; ctx.lineWidth = 1.5; ctx.stroke();
+      // Light
+      ctx.shadowColor = color;
+      ctx.shadowBlur  = 12;
+      ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2);
       ctx.fillStyle = color; ctx.fill();
       ctx.shadowBlur = 0;
+      // Timer arc
+      const frac = clamp((ctrl.timer || 0) / 8, 0, 1);
+      ctx.beginPath();
+      ctx.arc(0, 0, 10, -Math.PI/2, -Math.PI/2 + frac * Math.PI * 2);
+      ctx.strokeStyle = color + '88';
+      ctx.lineWidth = 2;
+      ctx.stroke();
     } else if (ctrl.type === 'stop') {
-      ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI*2);
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2);
       ctx.fillStyle = '#c0392b'; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
       ctx.fillStyle = '#fff';
-      ctx.font = 'bold 8px sans-serif';
+      ctx.font = 'bold 7px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('S', 0, 0);
+      ctx.fillText('STOP', 0, 0);
     }
     ctx.restore();
   }
 
   drawCars(cars) {
     const { ctx } = this;
-    const W = 10, H = 6;
     for (const car of cars) {
       if (!car.alive) continue;
+      const W = car.w, H = car.h;
       ctx.save();
       ctx.translate(car.x, car.y);
       ctx.rotate(car.angle);
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(1, 1, W/2, H/2, 0, 0, Math.PI*2);
+      ctx.fill();
+
       // Body
       ctx.fillStyle = car.color;
       ctx.beginPath();
       ctx.roundRect(-W/2, -H/2, W, H, 2);
       ctx.fill();
+
+      // Windshield tint
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.roundRect(-W/2 + 2, -H/2 + 1, W/2, H - 2, 1);
+      ctx.fill();
+
       // Headlights
       ctx.fillStyle = '#fffde7';
-      ctx.fillRect(W/2 - 2, -H/2 + 1, 2, 1.5);
-      ctx.fillRect(W/2 - 2,  H/2 - 2.5, 2, 1.5);
+      ctx.fillRect(W/2 - 2, -H/2 + 0.5, 2, 1.5);
+      ctx.fillRect(W/2 - 2,  H/2 - 2,   2, 1.5);
+
       ctx.restore();
     }
   }
@@ -152,12 +187,11 @@ class Renderer {
   drawPreviewEdge(from, to) {
     const { ctx } = this;
     ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.strokeStyle = 'rgba(100,180,255,0.6)';
-    ctx.lineWidth = 6;
+    ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y);
+    ctx.strokeStyle = 'rgba(100,180,255,0.55)';
+    ctx.lineWidth = ROAD_WIDTH;
     ctx.lineCap = 'round';
-    ctx.setLineDash([8,8]);
+    ctx.setLineDash([10, 10]);
     ctx.stroke();
     ctx.setLineDash([]);
   }
@@ -165,8 +199,8 @@ class Renderer {
   drawPreviewNode(pos) {
     const { ctx } = this;
     ctx.beginPath();
-    ctx.arc(pos.x, pos.y, 7, 0, Math.PI*2);
-    ctx.strokeStyle = 'rgba(100,180,255,0.8)';
+    ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(100,180,255,0.9)';
     ctx.lineWidth = 2;
     ctx.stroke();
   }

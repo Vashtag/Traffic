@@ -89,12 +89,26 @@ class Game {
   }
 
   _updateStats() {
-    document.getElementById('carCount').textContent = `Cars: ${this.traffic.cars.filter(c=>c.alive).length}`;
+    const alive = this.traffic.cars.filter(c => c.alive).length;
+    document.getElementById('carCount').textContent = `Cars: ${alive}`;
+
     const score = this.traffic.flowScore();
-    const el = document.getElementById('flowScore');
-    if (score === null) { el.textContent = 'Flow: –'; el.style.color = '#aaa'; return; }
-    el.textContent = `Flow: ${score}%`;
-    el.style.color = score > 60 ? '#2ecc71' : score > 30 ? '#f39c12' : '#e74c3c';
+    const flowEl = document.getElementById('flowScore');
+    if (score === null) { flowEl.textContent = 'Flow: –'; flowEl.style.color = '#aaa'; }
+    else {
+      flowEl.textContent = `Flow: ${score}%`;
+      flowEl.style.color = score > 60 ? '#2ecc71' : score > 30 ? '#f39c12' : '#e74c3c';
+    }
+
+    const rushEl = document.getElementById('rushIndicator');
+    if (this.traffic.isRushHour) {
+      rushEl.textContent = '🚨 Rush Hour!';
+      rushEl.style.opacity = '1';
+    } else {
+      const secs = this.traffic.timeUntilRush();
+      rushEl.textContent = `Rush in ${secs}s`;
+      rushEl.style.opacity = '0.45';
+    }
   }
 
   // Convert screen coords to world coords

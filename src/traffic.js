@@ -1,28 +1,38 @@
-const LIGHT_CYCLE = 8;       // seconds per phase
-const STOP_HOLD = 2;         // seconds a stop sign holds cars
-const TARGET_CARS = 12;      // sandbox car count
-const SPAWN_INTERVAL = 3;    // seconds between new car attempts
-const CONGESTION_DECAY = 0.3;// how fast congestion fades
+const LIGHT_CYCLE   = 8;
+const TARGET_CARS   = 10;
+const MAX_CARS      = 28;
+const SPAWN_INTERVAL = 2.5;
+
+// Rush hour: after RUSH_START seconds, car count spikes for RUSH_DURATION seconds, then cycles
+const RUSH_START    = 45;
+const RUSH_DURATION = 40;
+const RUSH_CYCLE    = 120;
 
 class TrafficManager {
   constructor(graph) {
     this.graph = graph;
-    this.cars = [];
-    this._nextCarId = 0;
-    this._spawnTimer = 0;
-    this._lightTimer = 0;
+    this.cars  = [];
+    this._nextCarId   = 0;
+    this._spawnTimer  = 0;
+    this._elapsed     = 0;
+    this.isRushHour   = false;
   }
 
   update(dt) {
+    this._elapsed += dt;
+    this._updateRushHour();
     this._updateLights(dt);
-    this._updateStopSigns(dt);
     this._spawnCars(dt);
     this._updateCars(dt);
     this._updateCongestion();
   }
 
+  _updateRushHour() {
+    const phase = this._elapsed % RUSH_CYCLE;
+    this.isRushHour = phase >= RUSH_START && phase < RUSH_START + RUSH_DURATION;
+  }
+
   _updateLights(dt) {
-    this._lightTimer += dt;
     for (const node of this.graph.allNodes()) {
       if (node.control?.type !== 'light') continue;
       const ctrl = node.control;
@@ -34,53 +44,54 @@ class TrafficManager {
     }
   }
 
-  _updateStopSigns(dt) {
-    for (const node of this.graph.allNodes()) {
-      if (node.control?.type !== 'stop') continue;
-      if (node.control.stopTimer > 0) node.control.stopTimer -= dt;
-    }
-  }
-
   _spawnCars(dt) {
     const nodes = this.graph.allNodes();
     if (nodes.length < 2) return;
 
     this._spawnTimer += dt;
-    if (this._spawnTimer < SPAWN_INTERVAL) return;
+    const interval = this.isRushHour ? SPAWN_INTERVAL * 0.5 : SPAWN_INTERVAL;
+    if (this._spawnTimer < interval) return;
     this._spawnTimer = 0;
 
-    // Remove dead cars
     this.cars = this.cars.filter(c => c.alive);
 
-    if (this.cars.length < TARGET_CARS) {
+    const target = this.isRushHour ? MAX_CARS : TARGET_CARS;
+    if (this.cars.length < target) {
       const car = new Car(this._nextCarId++, this.graph);
       if (car.alive) this.cars.push(car);
     }
   }
 
   _updateCars(dt) {
-    // Track which cars are on which edges for proximity checks
-    for (const car of this.cars) {
-      car.update(dt, this.cars);
-    }
+    for (const car of this.cars) car.update(dt, this.cars);
   }
 
   _updateCongestion() {
-    // Reset then recompute
     for (const edge of this.graph.allEdges()) {
-      const carsOnEdge = this.cars.filter(c => c.edge?.id === edge.id).length;
+      const count    = this.cars.filter(c => c.alive && c.edge?.id === edge.id).length;
       const capacity = Math.max(1, edge.length / MIN_GAP);
-      const load = carsOnEdge / capacity;
-      // Smooth towards new value
-      edge.congestion = lerp(edge.congestion, clamp(load, 0, 1), 0.1);
+      edge.congestion = lerp(edge.congestion, clamp(count / capacity, 0, 1), 0.08);
     }
   }
 
   flowScore() {
     const edges = this.graph.allEdges();
-    if (edges.length === 0) return null;
+    if (!edges.length) return null;
     const avg = edges.reduce((s, e) => s + e.congestion, 0) / edges.length;
     return Math.round((1 - avg) * 100);
+  }
+
+  rushProgress() {
+    if (!this.isRushHour) return 0;
+    const phase = this._elapsed % RUSH_CYCLE;
+    return (phase - RUSH_START) / RUSH_DURATION;
+  }
+
+  timeUntilRush() {
+    const phase = this._elapsed % RUSH_CYCLE;
+    if (this.isRushHour) return 0;
+    if (phase < RUSH_START) return Math.ceil(RUSH_START - phase);
+    return Math.ceil(RUSH_CYCLE - phase + RUSH_START);
   }
 
   addTrafficLight(node) {
@@ -88,6 +99,6 @@ class TrafficManager {
   }
 
   addStopSign(node) {
-    node.control = { type: 'stop', stopTimer: 0 };
+    node.control = { type: 'stop' };
   }
 }
