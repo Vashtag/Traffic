@@ -27,9 +27,10 @@ class Game {
     this._deleteHeld   = false;
     this._deletedIds   = new Set();
 
-    this._elapsed    = 0;
+    this._elapsed     = 0;
     this._minimapRect = null;
-    this.buildings   = this._generateBuildings();
+    this._undoStack   = [];       // max 60 entries
+    this.buildings    = this._generateBuildings();
 
     this._setupUI();
     this._input = new InputHandler(this.canvas, this);
@@ -90,6 +91,12 @@ class Game {
     });
 
     document.getElementById('shareBtn').addEventListener('click', () => this.save());
+    document.getElementById('undoBtn').addEventListener('click', () => this.undo());
+
+    // Keyboard: Ctrl+Z / Cmd+Z
+    window.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); this.undo(); }
+    });
 
     this._setHint();
   }
@@ -265,12 +272,63 @@ class Game {
     this._isDragging = false; this._deleteHeld = false;
   }
 
+  // ── Undo ─────────────────────────────────────────────────────────────────
+  _pushUndo(record) {
+    this._undoStack.push(record);
+    if (this._undoStack.length > 60) this._undoStack.shift();
+  }
+
+  undo() {
+    const record = this._undoStack.pop();
+    if (!record) { this._showToast('Nothing to undo'); return; }
+
+    if (record.type === 'edge_add') {
+      const edge = this.graph.allEdges().find(e => e.id === record.edgeId);
+      if (edge) {
+        this.traffic.cars.forEach(c => { if (c.edge?.id === edge.id) c.alive = false; });
+        this.graph.removeEdge(edge);
+      }
+
+    } else if (record.type === 'edge_del') {
+      const nA = this.graph._ensureNode(record.nA.id, record.nA.x, record.nA.y);
+      const nB = this.graph._ensureNode(record.nB.id, record.nB.x, record.nB.y);
+      this.graph._restoreEdge(record.eId, nA, nB, record.ow, record.lanes);
+      if (record.nA.ctrl) nA.control = record.nA.ctrl;
+      if (record.nB.ctrl) nB.control = record.nB.ctrl;
+
+    } else if (record.type === 'control') {
+      const node = this.graph.allNodes().find(n => n.id === record.nodeId);
+      if (node) node.control = record.prev;
+
+    } else if (record.type === 'oneway') {
+      const edge = this.graph.allEdges().find(e => e.id === record.edgeId);
+      if (edge) {
+        edge.oneWay = record.prev;
+        this.traffic.cars.forEach(c => { if (c.edge?.id === edge.id) c.alive = false; });
+      }
+
+    } else if (record.type === 'lanes') {
+      const edge = this.graph.allEdges().find(e => e.id === record.edgeId);
+      if (edge) edge.lanes = record.prev;
+
+    } else if (record.type === 'zone_add') {
+      const idx = this.traffic.zones.findIndex(z => z.id === record.zoneId);
+      if (idx !== -1) this.traffic.zones.splice(idx, 1);
+
+    } else if (record.type === 'zone_del') {
+      this.traffic.zones.push(record.zone);
+    }
+
+    this._showToast('↩ Undone');
+  }
+
   _handleRoadTap(pos) {
     if (!this._drawStart) { this._drawStart = { ...pos }; return; }
     if (dist(this._drawStart, pos) < 10) { this._drawStart = null; return; }
-    const a = this.graph.addNode(this._drawStart.x, this._drawStart.y);
-    const b = this.graph.addNode(pos.x, pos.y);
-    this.graph.addEdge(a, b);
+    const a    = this.graph.addNode(this._drawStart.x, this._drawStart.y);
+    const b    = this.graph.addNode(pos.x, pos.y);
+    const edge = this.graph.addEdge(a, b);
+    if (edge) this._pushUndo({ type: 'edge_add', edgeId: edge.id });
     this.audio.playClick();
     this._drawStart = { ...pos };
   }
@@ -278,6 +336,7 @@ class Game {
   _handleControlTap(world, type) {
     const hit = this.graph.hitTest(world.x, world.y, 22);
     if (!hit || hit.type !== 'node') return;
+    this._pushUndo({ type: 'control', nodeId: hit.node.id, prev: hit.node.control });
     if      (type === 'light')      this.traffic.addTrafficLight(hit.node);
     else if (type === 'stop')       this.traffic.addStopSign(hit.node);
     else if (type === 'roundabout') this.traffic.addRoundabout(hit.node);
@@ -287,6 +346,7 @@ class Game {
   _handleOneWayTap(world) {
     const hit = this.graph.hitTest(world.x, world.y, 22);
     if (!hit || hit.type !== 'edge') return;
+    this._pushUndo({ type: 'oneway', edgeId: hit.edge.id, prev: hit.edge.oneWay });
     this.graph.cycleOneWay(hit.edge);
     this.traffic.cars.forEach(c => { if (c.edge?.id === hit.edge.id) c.alive = false; });
   }
@@ -294,28 +354,43 @@ class Game {
   _handleUpgradeTap(world) {
     const hit = this.graph.hitTest(world.x, world.y, 22);
     if (!hit || hit.type !== 'edge') return;
+    this._pushUndo({ type: 'lanes', edgeId: hit.edge.id, prev: hit.edge.lanes });
     this.graph.upgradeLanes(hit.edge);
   }
 
   _handleZoneTap(world) {
-    // If tapping inside existing zone of same type, remove it; otherwise place new one
     const existing = this.traffic.zones.find(z => dist(z, world) < z.radius && z.type === this.zoneType);
-    if (existing) this.traffic.zones.splice(this.traffic.zones.indexOf(existing), 1);
-    else this.traffic.addZone(world.x, world.y, ZONE_RADIUS, this.zoneType);
+    if (existing) {
+      this._pushUndo({ type: 'zone_del', zone: { ...existing } });
+      this.traffic.zones.splice(this.traffic.zones.indexOf(existing), 1);
+    } else {
+      const zone = this.traffic.addZone(world.x, world.y, ZONE_RADIUS, this.zoneType);
+      this._pushUndo({ type: 'zone_add', zoneId: zone.id });
+    }
   }
 
   _eraseAt(world) {
     const hit = this.graph.hitTest(world.x, world.y, 22);
     if (!hit) {
-      // Also erase zones
-      this.traffic.removeZoneAt(world.x, world.y);
+      const zone = this.traffic.zones.find(z => dist(z, world) < z.radius);
+      if (zone) {
+        this._pushUndo({ type: 'zone_del', zone: { ...zone } });
+        this.traffic.removeZoneAt(world.x, world.y);
+      }
       return;
     }
     if (hit.type === 'edge' && !this._deletedIds.has(hit.edge.id)) {
-      this._deletedIds.add(hit.edge.id);
-      this.traffic.cars.forEach(c => { if (c.edge?.id === hit.edge.id) c.alive = false; });
-      this.graph.removeEdge(hit.edge);
+      const e = hit.edge;
+      this._pushUndo({
+        type: 'edge_del', eId: e.id, ow: e.oneWay, lanes: e.lanes,
+        nA: { id: e.a.id, x: e.a.x, y: e.a.y, ctrl: e.a.control },
+        nB: { id: e.b.id, x: e.b.x, y: e.b.y, ctrl: e.b.control },
+      });
+      this._deletedIds.add(e.id);
+      this.traffic.cars.forEach(c => { if (c.edge?.id === e.id) c.alive = false; });
+      this.graph.removeEdge(e);
     } else if (hit.type === 'node' && hit.node.control) {
+      this._pushUndo({ type: 'control', nodeId: hit.node.id, prev: hit.node.control });
       this.graph.removeControl(hit.node.id);
     }
   }
