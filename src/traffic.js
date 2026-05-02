@@ -101,4 +101,8 @@ class TrafficManager {
   addStopSign(node) {
     node.control = { type: 'stop' };
   }
+
+  addRoundabout(node) {
+    node.control = { type: 'roundabout' };
+  }
 }

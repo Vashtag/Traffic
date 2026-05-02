@@ -2,24 +2,24 @@ const ZOOM_MIN = 0.2, ZOOM_MAX = 4;
 
 class Game {
   constructor() {
-    this.canvas = document.getElementById('gameCanvas');
-    this.camera = { x: 0, y: 0, zoom: 1 };
+    this.canvas   = document.getElementById('gameCanvas');
+    this.camera   = { x: 0, y: 0, zoom: 1 };
     this.renderer = new Renderer(this.canvas, this.camera);
-    this.graph = new RoadGraph();
-    this.traffic = new TrafficManager(this.graph);
+    this.graph    = new RoadGraph();
+    this.traffic  = new TrafficManager(this.graph);
 
-    this.tool = 'road';
+    this.tool     = 'road';
     this.gridSnap = false;
-    this.paused = false;
+    this.paused   = false;
 
-    // Road drawing state
-    this._drawStart = null;
-    this._mouseWorld = { x: 0, y: 0 };
-    this._isDragging = false;
-    this._dragStart = null;
-    this._dragCamStart = null;
-    this._downPos = null;
-    this._downTime = 0;
+    this._drawStart     = null;
+    this._mouseWorld    = { x: 0, y: 0 };
+    this._isDragging    = false;
+    this._dragStart     = null;
+    this._dragCamStart  = null;
+    this._downPos       = null;
+    this._deleteHeld    = false;   // true while pointer is down in delete mode
+    this._deletedIds    = new Set(); // edges deleted this drag stroke
 
     this._setupUI();
     this._input = new InputHandler(this.canvas, this);
@@ -56,10 +56,12 @@ class Game {
 
   _setHint() {
     const hints = {
-      road:   'Tap a point to start a road, tap again to finish it.',
-      light:  'Tap a road intersection to place a traffic light.',
-      stop:   'Tap a road intersection to place a stop sign.',
-      delete: 'Tap a road or control to delete it.',
+      road:       'Tap to start a road, tap again to extend it. Double-tap end to stop.',
+      light:      'Tap an intersection to place a traffic light.',
+      stop:       'Tap an intersection to place a stop sign.',
+      roundabout: 'Tap an intersection to convert it to a roundabout.',
+      oneway:     'Tap a road to cycle: two-way → one-way → reverse → two-way.',
+      delete:     'Tap or drag over roads/controls to delete them.',
     };
     document.getElementById('hint').textContent = hints[this.tool] || '';
   }
@@ -77,7 +79,6 @@ class Game {
     this.renderer.drawNodes(this.graph.allNodes());
     this.renderer.drawCars(this.traffic.cars);
 
-    // Preview while drawing
     if (this.tool === 'road' && this._drawStart) {
       const snap = this.gridSnap ? snapToGrid(this._mouseWorld.x, this._mouseWorld.y) : this._mouseWorld;
       this.renderer.drawPreviewEdge(this._drawStart, snap);
@@ -92,26 +93,24 @@ class Game {
     const alive = this.traffic.cars.filter(c => c.alive).length;
     document.getElementById('carCount').textContent = `Cars: ${alive}`;
 
-    const score = this.traffic.flowScore();
+    const score  = this.traffic.flowScore();
     const flowEl = document.getElementById('flowScore');
     if (score === null) { flowEl.textContent = 'Flow: –'; flowEl.style.color = '#aaa'; }
     else {
-      flowEl.textContent = `Flow: ${score}%`;
-      flowEl.style.color = score > 60 ? '#2ecc71' : score > 30 ? '#f39c12' : '#e74c3c';
+      flowEl.textContent  = `Flow: ${score}%`;
+      flowEl.style.color  = score > 60 ? '#2ecc71' : score > 30 ? '#f39c12' : '#e74c3c';
     }
 
     const rushEl = document.getElementById('rushIndicator');
     if (this.traffic.isRushHour) {
-      rushEl.textContent = '🚨 Rush Hour!';
+      rushEl.textContent  = '🚨 Rush Hour!';
       rushEl.style.opacity = '1';
     } else {
-      const secs = this.traffic.timeUntilRush();
-      rushEl.textContent = `Rush in ${secs}s`;
+      rushEl.textContent  = `Rush in ${this.traffic.timeUntilRush()}s`;
       rushEl.style.opacity = '0.45';
     }
   }
 
-  // Convert screen coords to world coords
   screenToWorld(pos) {
     return {
       x: (pos.x - this.camera.x) / this.camera.zoom,
@@ -120,11 +119,17 @@ class Game {
   }
 
   handleDown(pos) {
-    this._downPos = pos;
-    this._downTime = performance.now();
-    this._isDragging = false;
-    this._dragStart = pos;
+    this._downPos      = pos;
+    this._isDragging   = false;
+    this._dragStart    = pos;
     this._dragCamStart = { x: this.camera.x, y: this.camera.y };
+
+    if (this.tool === 'delete') {
+      this._deleteHeld = true;
+      this._deletedIds.clear();
+      // Immediate hit on press
+      this._eraseAt(this.screenToWorld(pos));
+    }
   }
 
   handleMove(pos) {
@@ -134,38 +139,46 @@ class Game {
       const dx = pos.x - this._downPos.x;
       const dy = pos.y - this._downPos.y;
       if (Math.hypot(dx, dy) > 8) {
-        // Only pan when not in road drawing mode (or no drawStart yet)
-        if (this.tool !== 'road' || !this._drawStart) {
-          this._isDragging = true;
-        }
+        if (this.tool !== 'road' || !this._drawStart) this._isDragging = true;
       }
-      if (this._isDragging && this._dragStart) {
+      if (this._isDragging && this.tool !== 'delete' && this._dragStart) {
         this.camera.x = this._dragCamStart.x + (pos.x - this._dragStart.x);
         this.camera.y = this._dragCamStart.y + (pos.y - this._dragStart.y);
       }
     }
+
+    // Drag-erase
+    if (this._deleteHeld && this._downPos) {
+      const dx = pos.x - this._downPos.x, dy = pos.y - this._downPos.y;
+      if (Math.hypot(dx, dy) > 6) this._eraseAt(this._mouseWorld);
+    }
   }
 
   handleUp(pos) {
-    const wasDragging = this._isDragging;
-    this._isDragging = false;
-    this._downPos = null;
+    const wasDragging   = this._isDragging;
+    this._isDragging    = false;
+    this._downPos       = null;
+    this._deleteHeld    = false;
 
-    if (wasDragging) return; // was a pan, not a tap
+    if (this.tool === 'delete') return; // deletion handled in handleDown/handleMove
 
-    const world = this.screenToWorld(pos);
+    if (wasDragging) return;
+
+    const world   = this.screenToWorld(pos);
     const snapped = this.gridSnap ? snapToGrid(world.x, world.y) : world;
 
-    if (this.tool === 'road') this._handleRoadTap(snapped);
-    else if (this.tool === 'light') this._handleControlTap(world, 'light');
-    else if (this.tool === 'stop') this._handleControlTap(world, 'stop');
-    else if (this.tool === 'delete') this._handleDelete(world);
+    if      (this.tool === 'road')       this._handleRoadTap(snapped);
+    else if (this.tool === 'light')      this._handleControlTap(world, 'light');
+    else if (this.tool === 'stop')       this._handleControlTap(world, 'stop');
+    else if (this.tool === 'roundabout') this._handleControlTap(world, 'roundabout');
+    else if (this.tool === 'oneway')     this._handleOneWayTap(world);
   }
 
   cancelDown() {
-    this._drawStart = null;
-    this._downPos = null;
+    this._drawStart  = null;
+    this._downPos    = null;
     this._isDragging = false;
+    this._deleteHeld = false;
   }
 
   _handleRoadTap(pos) {
@@ -176,25 +189,33 @@ class Game {
       const a = this.graph.addNode(this._drawStart.x, this._drawStart.y);
       const b = this.graph.addNode(pos.x, pos.y);
       this.graph.addEdge(a, b);
-      // Chain: new start is where we just ended
       this._drawStart = { ...pos };
     }
   }
 
   _handleControlTap(world, type) {
-    const hit = this.graph.hitTest(world.x, world.y, 20);
+    const hit = this.graph.hitTest(world.x, world.y, 22);
     if (!hit) return;
     const node = hit.type === 'node' ? hit.node : null;
     if (!node) return;
-    if (type === 'light') this.traffic.addTrafficLight(node);
-    else if (type === 'stop') this.traffic.addStopSign(node);
+    if      (type === 'light')      this.traffic.addTrafficLight(node);
+    else if (type === 'stop')       this.traffic.addStopSign(node);
+    else if (type === 'roundabout') this.traffic.addRoundabout(node);
   }
 
-  _handleDelete(world) {
-    const hit = this.graph.hitTest(world.x, world.y, 20);
+  _handleOneWayTap(world) {
+    const hit = this.graph.hitTest(world.x, world.y, 22);
+    if (!hit || hit.type !== 'edge') return;
+    this.graph.cycleOneWay(hit.edge);
+    // Reroute cars whose path used this edge in the now-blocked direction
+    this.traffic.cars.forEach(c => { if (c.edge?.id === hit.edge.id) c.alive = false; });
+  }
+
+  _eraseAt(world) {
+    const hit = this.graph.hitTest(world.x, world.y, 22);
     if (!hit) return;
-    if (hit.type === 'edge') {
-      // Kill cars on this edge
+    if (hit.type === 'edge' && !this._deletedIds.has(hit.edge.id)) {
+      this._deletedIds.add(hit.edge.id);
       this.traffic.cars.forEach(c => { if (c.edge?.id === hit.edge.id) c.alive = false; });
       this.graph.removeEdge(hit.edge);
     } else if (hit.type === 'node' && hit.node.control) {
@@ -204,7 +225,7 @@ class Game {
 
   zoom(factor, pivot) {
     const newZoom = clamp(this.camera.zoom * factor, ZOOM_MIN, ZOOM_MAX);
-    const actual = newZoom / this.camera.zoom;
+    const actual  = newZoom / this.camera.zoom;
     this.camera.x = pivot.x - (pivot.x - this.camera.x) * actual;
     this.camera.y = pivot.y - (pivot.y - this.camera.y) * actual;
     this.camera.zoom = newZoom;
