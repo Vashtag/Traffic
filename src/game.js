@@ -12,6 +12,7 @@ class Game {
     this.graph    = new RoadGraph();
     this.traffic  = new TrafficManager(this.graph);
     this.audio    = new AudioManager();
+    this.heatmap  = new HeatmapManager();
 
     this.tool         = 'road';
     this.gridSnap     = false;
@@ -90,6 +91,11 @@ class Game {
       e.currentTarget.textContent = muted ? '🔇' : '🔊';
     });
 
+    document.getElementById('heatmapBtn').addEventListener('click', e => {
+      const on = this.heatmap.toggle();
+      e.currentTarget.classList.toggle('active', on);
+    });
+
     document.getElementById('shareBtn').addEventListener('click', () => this.save());
     document.getElementById('undoBtn').addEventListener('click', () => this.undo());
 
@@ -123,6 +129,7 @@ class Game {
       this._elapsed += dt;
       this.traffic.update(dt);
       this.audio.tick(this.traffic);
+      this.heatmap.update(this.traffic.cars, dt);
     }
 
     // Day/night: 0-1 over DAY_CYCLE seconds
@@ -136,6 +143,7 @@ class Game {
     this.renderer.drawZones(this.traffic.zones);
     this.renderer.drawEdges(this.graph.allEdges());
     this.renderer.drawNodes(this.graph.allNodes());
+    this.renderer.drawHeatmap(this.heatmap);
     this.renderer.drawCars(this.traffic.cars);
     this.renderer.drawAlerts(this.graph.allEdges(), this.traffic.cars, this._elapsed);
 

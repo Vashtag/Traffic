@@ -267,6 +267,25 @@ class Renderer {
     ctx.restore();
   }
 
+  drawHeatmap(heatmap) {
+    if (!heatmap.enabled || !heatmap.cells.size) return;
+    const { ctx } = this;
+    const cs = heatmap.cellSize;
+    const vb = this._viewBounds(cs * 2);
+    const r  = cs * 0.88; // circle slightly larger than cell for blending overlap
+
+    for (const [key, heat] of heatmap.cells) {
+      const [cxs, cys] = key.split(',');
+      const wx = (parseInt(cxs) + 0.5) * cs;
+      const wy = (parseInt(cys) + 0.5) * cs;
+      if (wx < vb.left || wx > vb.right || wy < vb.top || wy > vb.bottom) continue;
+      ctx.beginPath();
+      ctx.arc(wx, wy, r, 0, Math.PI * 2);
+      ctx.fillStyle = heatColor(heat);
+      ctx.fill();
+    }
+  }
+
   drawCars(cars) {
     const { ctx } = this;
     const vb = this._viewBounds(20);
