@@ -508,9 +508,73 @@ class Game {
   }
 
   pan(dx, dy) { this.camera.x += dx; this.camera.y += dy; }
+
+  // ── Starter city ──────────────────────────────────────────────────────────
+  _buildStarterCity() {
+    const g = this.graph;
+    const n = (x, y) => g.addNode(x, y);
+    const e = (a, b) => g.addEdge(a, b);
+
+    // --- 4×3 main grid ---
+    //   c0     c1     c2     c3
+    const r0c0 = n(-300,-200); const r0c1 = n( -90,-195); const r0c2 = n( 110,-205); const r0c3 = n( 310,-195);
+    const r1c0 = n(-305,   0); const r1c1 = n( -90,   0); const r1c2 = n( 110,   0); const r1c3 = n( 315,   5);
+    const r2c0 = n(-300, 200); const r2c1 = n( -90, 200); const r2c2 = n( 110, 200); const r2c3 = n( 310, 200);
+
+    // Horizontals
+    e(r0c0,r0c1); e(r0c1,r0c2); e(r0c2,r0c3);
+    e(r1c0,r1c1); e(r1c1,r1c2); e(r1c2,r1c3);
+    e(r2c0,r2c1); e(r2c1,r2c2); e(r2c2,r2c3);
+
+    // Verticals
+    e(r0c0,r1c0); e(r1c0,r2c0);
+    e(r0c1,r1c1); e(r1c1,r2c1);
+    e(r0c2,r1c2); e(r1c2,r2c2);
+    e(r0c3,r1c3); e(r1c3,r2c3);
+
+    // --- Organic extras ---
+    // Northern bypass arc: top-left → peak → top-right
+    const bypass = n(  10,-360);
+    e(r0c0, bypass); e(bypass, r0c3);
+
+    // Western spur with a bend
+    const wBend = n(-460, 100);
+    e(r1c0, wBend); e(wBend, r2c0);
+
+    // Eastern extension
+    const eExt = n(480, 0);
+    e(r1c3, eExt);
+
+    // Southern dead-end street
+    const sSpur = n(200, 340);
+    e(r2c2, sSpur);
+
+    // Diagonal shortcut across the center
+    e(r0c1, r1c2);
+
+    // --- Traffic controls at the two busiest central intersections ---
+    this.traffic.addTrafficLight(r1c1);   // -90,0 — most-used junction
+    this.traffic.addTrafficLight(r1c2);   // 110,0 — second busiest
+    // Stagger their phases so they're not both red at the same time
+    r1c2.control.state = 'red';
+    r1c2.control.timer = 4;
+
+    // Stop sign on the diagonal shortcut entry
+    this.traffic.addStopSign(r0c1);
+
+    // Clear undo stack so starter roads aren't undoable
+    this._undoStack = [];
+  }
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   window.game = new Game();
-  window.game._loadFromHash();
+  if (location.hash) {
+    window.game._loadFromHash();
+  } else {
+    window.game._buildStarterCity();
+    // Centre camera on the city
+    window.game.camera.x = window.innerWidth  / 2;
+    window.game.camera.y = window.innerHeight / 2;
+  }
 });
