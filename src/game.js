@@ -89,6 +89,8 @@ class Game {
       e.currentTarget.textContent = muted ? '🔇' : '🔊';
     });
 
+    document.getElementById('shareBtn').addEventListener('click', () => this.save());
+
     this._setHint();
   }
 
@@ -318,6 +320,94 @@ class Game {
     }
   }
 
+  // ── Save / Load ───────────────────────────────────────────────────────────
+  _serialize() {
+    const CTRL = { light: 1, stop: 2, roundabout: 3 };
+    const nodes = this.graph.allNodes().map(n => {
+      const row = [n.id, Math.round(n.x), Math.round(n.y)];
+      if (n.control) {
+        row.push(CTRL[n.control.type] ?? 0);
+        if (n.control.type === 'light') row.push(n.control.state === 'red' ? 1 : 0);
+      }
+      return row;
+    });
+    const edges = this.graph.allEdges().map(e => [
+      e.id, e.a.id, e.b.id,
+      e.oneWay === 'ab' ? 1 : e.oneWay === 'ba' ? 2 : 0,
+      e.lanes || 1,
+    ]);
+    const zones = this.traffic.zones.map(z => [
+      Math.round(z.x), Math.round(z.y), Math.round(z.radius), z.type === 'slow' ? 0 : 1,
+    ]);
+    const cam = [
+      Math.round(this.camera.x), Math.round(this.camera.y),
+      Math.round(this.camera.zoom * 1000) / 1000,
+    ];
+    return { v: 1, nodes, edges, zones, cam };
+  }
+
+  _deserialize(data) {
+    if (data.v !== 1) return;
+
+    // Rebuild graph
+    this.graph   = new RoadGraph();
+    this.traffic = new TrafficManager(this.graph);
+    // Re-attach audio which still refs old traffic — update reference
+    const nodeMap = this.graph.loadData({ nodes: data.nodes, edges: data.edges });
+
+    // Restore controls
+    const CTRL = { 1: 'light', 2: 'stop', 3: 'roundabout' };
+    for (const row of data.nodes) {
+      const [id,,,ctrlType, ctrlState] = row;
+      if (!ctrlType) continue;
+      const node = nodeMap[id];
+      const type = CTRL[ctrlType];
+      if (type === 'light')      this.traffic.addTrafficLight(node);
+      else if (type === 'stop')  this.traffic.addStopSign(node);
+      else if (type === 'roundabout') this.traffic.addRoundabout(node);
+      if (type === 'light' && node.control) node.control.state = ctrlState === 1 ? 'red' : 'green';
+    }
+
+    // Restore zones
+    for (const [x, y, r, t] of (data.zones || [])) {
+      this.traffic.addZone(x, y, r, t === 0 ? 'slow' : 'fast');
+    }
+
+    // Restore camera
+    if (data.cam) {
+      [this.camera.x, this.camera.y, this.camera.zoom] = data.cam;
+    }
+  }
+
+  save() {
+    const json  = JSON.stringify(this._serialize());
+    const hash  = btoa(unescape(encodeURIComponent(json)));
+    history.replaceState(null, '', '#' + hash);
+    navigator.clipboard?.writeText(location.href)
+      .then(()  => this._showToast('🔗 Link copied!'))
+      .catch(()  => this._showToast('🔗 URL updated — copy from address bar'));
+  }
+
+  _loadFromHash() {
+    const hash = location.hash.slice(1);
+    if (!hash) return;
+    try {
+      const json = decodeURIComponent(escape(atob(hash)));
+      this._deserialize(JSON.parse(json));
+      this._showToast('City loaded!');
+    } catch (e) {
+      console.warn('Could not load city from URL:', e);
+    }
+  }
+
+  _showToast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+  }
+
   zoom(factor, pivot) {
     const newZoom = clamp(this.camera.zoom * factor, ZOOM_MIN, ZOOM_MAX);
     const actual  = newZoom / this.camera.zoom;
@@ -329,4 +419,7 @@ class Game {
   pan(dx, dy) { this.camera.x += dx; this.camera.y += dy; }
 }
 
-window.addEventListener('DOMContentLoaded', () => { window.game = new Game(); });
+window.addEventListener('DOMContentLoaded', () => {
+  window.game = new Game();
+  window.game._loadFromHash();
+});
