@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Traffic Control</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="toolbar">
+    <button class="tool-btn active" data-tool="road" title="Draw Road">🛣️</button>
+    <button class="tool-btn" data-tool="light" title="Traffic Light">🚦</button>
+    <button class="tool-btn" data-tool="stop" title="Stop Sign">🛑</button>
+    <button class="tool-btn" data-tool="delete" title="Delete">🗑️</button>
+    <div class="separator"></div>
+    <button class="tool-btn" id="gridToggle" title="Toggle Grid Snap">⊞</button>
+    <div class="separator"></div>
+    <button class="tool-btn" id="pauseBtn" title="Pause">⏸️</button>
+  </div>
+
+  <div id="stats">
+    <span id="carCount">Cars: 0</span>
+    <span id="flowScore">Flow: –</span>
+  </div>
+
+  <div id="hint">Draw roads to get started. Tap two points to connect them.</div>
+
+  <script src="src/utils.js"></script>
+  <script src="src/graph.js"></script>
+  <script src="src/pathfinding.js"></script>
+  <script src="src/car.js"></script>
+  <script src="src/traffic.js"></script>
+  <script src="src/renderer.js"></script>
+  <script src="src/input.js"></script>
+  <script src="src/game.js"></script>
+</body>
+</html>
