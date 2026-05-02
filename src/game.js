@@ -120,6 +120,7 @@ class Game {
     this.renderer.drawEdges(this.graph.allEdges());
     this.renderer.drawNodes(this.graph.allNodes());
     this.renderer.drawCars(this.traffic.cars);
+    this.renderer.drawAlerts(this.graph.allEdges(), this.traffic.cars, this._elapsed);
 
     // Previews
     if (this.tool === 'road' && this._drawStart) {

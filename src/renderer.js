@@ -262,6 +262,64 @@ class Renderer {
     ctx.strokeStyle = 'rgba(100,180,255,0.9)'; ctx.lineWidth = 2; ctx.stroke();
   }
 
+  // Congestion alert bubbles over jammed roads + stuck-car steam
+  drawAlerts(edges, cars, time) {
+    const { ctx } = this;
+    const THRESHOLD = 0.62;
+
+    // --- Edge congestion bubbles ---
+    for (const e of edges) {
+      if (e.congestion < THRESHOLD) continue;
+      const severity = (e.congestion - THRESHOLD) / (1 - THRESHOLD); // 0-1
+      const mx = (e.a.x + e.b.x) / 2;
+      const my = (e.a.y + e.b.y) / 2 - 18;
+
+      const pulse = 1 + 0.18 * Math.sin(time * 3.5 + e.id);
+      const r     = (10 + severity * 5) * pulse;
+      const alpha = 0.55 + severity * 0.4;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // Glow
+      ctx.shadowColor = '#e74c3c';
+      ctx.shadowBlur  = 10 + severity * 8;
+
+      // Bubble
+      ctx.beginPath(); ctx.arc(mx, my, r, 0, Math.PI * 2);
+      ctx.fillStyle = severity > 0.6 ? '#c0392b' : '#e74c3c';
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+
+      // "!" or "!!" depending on severity
+      ctx.fillStyle = '#fff';
+      ctx.font      = `bold ${Math.round(r * 0.9)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(severity > 0.75 ? '!!' : '!', mx, my);
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    // --- Stuck car steam puffs ---
+    for (const car of cars) {
+      if (!car.alive || car.stuckTime < 5) continue;
+      const intensity = clamp((car.stuckTime - 5) / 10, 0, 1);
+      const wobble    = Math.sin(time * 4 + car.id) * 3;
+      const px        = car.x + wobble;
+      const py        = car.y - car.h - 6 - Math.sin(time * 2 + car.id) * 2;
+
+      ctx.save();
+      ctx.globalAlpha = 0.5 + intensity * 0.4;
+      ctx.font        = `${9 + intensity * 4}px sans-serif`;
+      ctx.textAlign   = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('💢', px, py);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+
   drawZonePreview(pos, radius, type) {
     const { ctx } = this;
     const color = type === 'slow' ? '255,80,80' : '80,160,255';
