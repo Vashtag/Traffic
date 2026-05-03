@@ -576,57 +576,80 @@ class Game {
   // ── Starter city ──────────────────────────────────────────────────────────
   _buildStarterCity() {
     const g = this.graph;
-    const n = (x, y) => g.addNode(x, y);
-    const e = (a, b) => g.addEdge(a, b);
+    const B = BUILDING_BLOCK; // 120 — roads on block boundaries avoid buildings
 
-    // --- 4×3 main grid ---
-    //   c0     c1     c2     c3
-    const r0c0 = n(-300,-200); const r0c1 = n( -90,-195); const r0c2 = n( 110,-205); const r0c3 = n( 310,-195);
-    const r1c0 = n(-305,   0); const r1c1 = n( -90,   0); const r1c2 = n( 110,   0); const r1c3 = n( 315,   5);
-    const r2c0 = n(-300, 200); const r2c1 = n( -90, 200); const r2c2 = n( 110, 200); const r2c3 = n( 310, 200);
+    // Fisher-Yates shuffle + sorted slice
+    const sample = (arr, n) => {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a.slice(0, Math.min(n, a.length)).sort((x, y) => x - y);
+    };
 
-    // Horizontals
-    e(r0c0,r0c1); e(r0c1,r0c2); e(r0c2,r0c3);
-    e(r1c0,r1c1); e(r1c1,r1c2); e(r1c2,r1c3);
-    e(r2c0,r2c1); e(r2c1,r2c2); e(r2c2,r2c3);
+    // Block-index options  (roads at index * 120)
+    const colOpts = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
+    const rowOpts = [-3, -2, -1, 0, 1, 2, 3];
 
-    // Verticals
-    e(r0c0,r1c0); e(r1c0,r2c0);
-    e(r0c1,r1c1); e(r1c1,r2c1);
-    e(r0c2,r1c2); e(r1c2,r2c2);
-    e(r0c3,r1c3); e(r1c3,r2c3);
+    const cols = sample(colOpts, 3 + Math.floor(Math.random() * 3)); // 3–5 cols
+    const rows = sample(rowOpts, 3 + Math.floor(Math.random() * 3)); // 3–5 rows
 
-    // --- Organic extras ---
-    // Northern bypass arc: top-left → peak → top-right
-    const bypass = n(  10,-360);
-    e(r0c0, bypass); e(bypass, r0c3);
+    // Nodes at every grid intersection
+    const grid = {};
+    for (const c of cols) for (const r of rows) {
+      grid[`${c},${r}`] = g.addNode(c * B, r * B);
+    }
 
-    // Western spur with a bend
-    const wBend = n(-460, 100);
-    e(r1c0, wBend); e(wBend, r2c0);
+    // Horizontal streets
+    for (const r of rows) for (let i = 0; i < cols.length - 1; i++) {
+      g.addEdge(grid[`${cols[i]},${r}`], grid[`${cols[i + 1]},${r}`]);
+    }
+    // Vertical streets
+    for (const c of cols) for (let i = 0; i < rows.length - 1; i++) {
+      g.addEdge(grid[`${c},${rows[i]}`], grid[`${c},${rows[i + 1]}`]);
+    }
 
-    // Eastern extension
-    const eExt = n(480, 0);
-    e(r1c3, eExt);
+    // Axis-aligned spurs (dead-ends along block boundaries — always building-safe)
+    const baseNodes = g.allNodes();
+    const spurCount = 1 + Math.floor(Math.random() * 3);
+    for (let s = 0; s < spurCount; s++) {
+      const base  = baseNodes[Math.floor(Math.random() * baseNodes.length)];
+      const horiz = Math.random() < 0.5;
+      const len   = (1 + Math.floor(Math.random() * 2)) * B;
+      const sign  = Math.random() < 0.5 ? 1 : -1;
+      const tx    = base.x + (horiz ? len * sign : 0);
+      const ty    = base.y + (horiz ? 0 : len * sign);
+      // Skip if a node is already nearby
+      if (!baseNodes.find(n => Math.abs(n.x - tx) < B * 0.5 && Math.abs(n.y - ty) < B * 0.5)) {
+        g.addEdge(base, g.addNode(tx, ty));
+      }
+    }
 
-    // Southern dead-end street
-    const sSpur = n(200, 340);
-    e(r2c2, sSpur);
+    // Place traffic controls at the busiest intersections
+    const allEdges = g.allEdges();
+    const allNodes = g.allNodes();
+    const degree   = n => allEdges.filter(e => e.a.id === n.id || e.b.id === n.id).length;
+    const candidates = allNodes.filter(n => degree(n) >= 3);
 
-    // Diagonal shortcut across the center
-    e(r0c1, r1c2);
+    // Shuffle candidates for variety
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
 
-    // --- Traffic controls at the two busiest central intersections ---
-    this.traffic.addTrafficLight(r1c1);   // -90,0 — most-used junction
-    this.traffic.addTrafficLight(r1c2);   // 110,0 — second busiest
-    // Stagger their phases so they're not both red at the same time
-    r1c2.control.state = 'red';
-    r1c2.control.timer = 4;
+    const numLights = 1 + Math.floor(Math.random() * Math.min(3, candidates.length));
+    for (let i = 0; i < numLights && i < candidates.length; i++) {
+      this.traffic.addTrafficLight(candidates[i]);
+      if (i > 0 && candidates[i].control) {
+        candidates[i].control.state = 'red';
+        candidates[i].control.timer = 3 + i * 2;
+      }
+    }
+    if (Math.random() < 0.65 && candidates[numLights]) {
+      this.traffic.addStopSign(candidates[numLights]);
+    }
 
-    // Stop sign on the diagonal shortcut entry
-    this.traffic.addStopSign(r0c1);
-
-    // Clear undo stack so starter roads aren't undoable
     this._undoStack = [];
   }
 }
