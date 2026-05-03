@@ -133,6 +133,18 @@ body {
   100% { transform: scale(1); }
 }
 
+/* Emergency indicator */
+#emergencyIndicator {
+  font-weight: 700;
+  font-size: 13px;
+  transition: opacity 0.3s;
+  animation: sirenflash 0.5s ease-in-out infinite;
+}
+@keyframes sirenflash {
+  0%, 100% { color: #e74c3c; }
+  50%       { color: #3498db; }
+}
+
 /* Budget display */
 #budgetDisplay {
   display: flex;

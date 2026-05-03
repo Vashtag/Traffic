@@ -292,6 +292,7 @@ class Renderer {
     for (const car of cars) {
       if (!car.alive) continue;
       if (car.x < vb.left || car.x > vb.right || car.y < vb.top || car.y > vb.bottom) continue;
+      if (car.isEmergency) { this._drawEmergencyCar(car); continue; }
       const W = car.w, H = car.h;
       ctx.save();
       ctx.globalAlpha = car.opacity ?? 1;
@@ -308,6 +309,58 @@ class Renderer {
       ctx.globalAlpha = 1;
       ctx.restore();
     }
+  }
+
+  _drawEmergencyCar(car) {
+    const { ctx } = this;
+    const W = car.w, H = car.h;
+    const sirenA = Math.sin(car.sirenPhase) > 0; // alternates true/false
+
+    ctx.save();
+    ctx.globalAlpha = car.opacity ?? 1;
+    ctx.translate(car.x, car.y);
+    ctx.rotate(car.angle);
+
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.ellipse(1, 1, W/2, H/2, 0, 0, Math.PI*2); ctx.fill();
+
+    // Body
+    ctx.fillStyle = car.color;
+    ctx.beginPath(); ctx.roundRect(-W/2, -H/2, W, H, 2); ctx.fill();
+
+    // Stripe: red cross bar for ambulance, yellow stripe for fire truck
+    if (car.emergencyType === 'ambulance') {
+      ctx.fillStyle = '#e74c3c';
+      ctx.fillRect(-W/2, -1.2, W, 2.4);
+    } else {
+      ctx.fillStyle = '#f1c40f';
+      ctx.fillRect(-W/2, -1, W, 2);
+    }
+
+    // Windows
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.roundRect(-W/2+2, -H/2+1, W/2, H-2, 1); ctx.fill();
+
+    // Headlights
+    ctx.fillStyle = '#fffde7';
+    ctx.fillRect(W/2-2, -H/2+0.5, 2, 1.5);
+    ctx.fillRect(W/2-2,  H/2-2,   2, 1.5);
+
+    // Siren lights on roof — alternating red/blue
+    const colA = sirenA ? '#e74c3c' : '#3498db';
+    const colB = sirenA ? '#3498db' : '#e74c3c';
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = colA;
+    ctx.fillStyle = colA;
+    ctx.beginPath(); ctx.arc(-W * 0.22, -H/2 - 2.5, 2.8, 0, Math.PI*2); ctx.fill();
+    ctx.shadowColor = colB;
+    ctx.fillStyle = colB;
+    ctx.beginPath(); ctx.arc( W * 0.22, -H/2 - 2.5, 2.8, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   drawPreviewEdge(from, to) {
@@ -375,9 +428,9 @@ class Renderer {
       ctx.restore();
     }
 
-    // --- Stuck car steam puffs ---
+    // --- Stuck car steam puffs (skip emergency vehicles) ---
     for (const car of cars) {
-      if (!car.alive || car.stuckTime < 5) continue;
+      if (!car.alive || car.isEmergency || car.stuckTime < 5) continue;
       const intensity = clamp((car.stuckTime - 5) / 10, 0, 1);
       const wobble    = Math.sin(time * 4 + car.id) * 3;
       const px        = car.x + wobble;
@@ -444,12 +497,18 @@ class Renderer {
       ctx.stroke();
     }
 
-    // Cars as tiny dots
+    // Cars as tiny dots; emergency vehicles as larger flashing dots
     for (const car of cars) {
       if (!car.alive) continue;
       const p = toMini(car.x, car.y);
-      ctx.beginPath(); ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fill();
+      if (car.isEmergency) {
+        const col = Math.sin(car.sirenPhase ?? 0) > 0 ? '#e74c3c' : '#3498db';
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = col; ctx.fill();
+      } else {
+        ctx.beginPath(); ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fill();
+      }
     }
 
     // Camera viewport box

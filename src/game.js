@@ -153,6 +153,23 @@ class Game {
       this.traffic.update(dt);
       this.audio.tick(this.traffic);
       this.heatmap.update(this.traffic.cars, dt);
+
+      // Process emergency events
+      for (const ev of this.traffic._emergencyEvents) {
+        const emoji = ev.vehicleType === 'ambulance' ? '🚑' : '🚒';
+        if (ev.kind === 'spawned') {
+          this._showToast(`${emoji} Emergency! Guide them through.`);
+        } else if (ev.kind === 'complete') {
+          this.budget += 500;
+          this._showToast(`${emoji} Emergency cleared! +$500`);
+          this.audio.playGradeUp();
+        } else if (ev.kind === 'expired') {
+          this.budget = Math.max(0, this.budget - 300);
+          this._showToast(`${emoji} Emergency timed out! -$300`);
+          this.audio.playGradeDown();
+        }
+      }
+      this.traffic._emergencyEvents = [];
     }
 
     // Day/night: 0-1 over DAY_CYCLE seconds
@@ -235,6 +252,18 @@ class Game {
     const t = this.renderer.dayTime;
     document.getElementById('timeOfDay').textContent =
       t < 0.25 ? 'Night' : t < 0.35 ? 'Dawn' : t < 0.65 ? 'Day' : t < 0.80 ? 'Dusk' : 'Night';
+
+    // Emergency indicator
+    const emergencies = this.traffic.cars.filter(c => c.isEmergency && c.alive);
+    const emergEl = document.getElementById('emergencyIndicator');
+    if (emergencies.length > 0) {
+      const worst = emergencies.reduce((m, e) => e.missionTimer < m.missionTimer ? e : m, emergencies[0]);
+      const emoji = worst.emergencyType === 'ambulance' ? '🚑' : '🚒';
+      emergEl.textContent = `${emoji} ${Math.ceil(worst.missionTimer)}s`;
+      emergEl.style.opacity = '1';
+    } else {
+      emergEl.style.opacity = '0';
+    }
 
     // Budget
     document.getElementById('budget').textContent = `$${Math.floor(this.budget).toLocaleString()}`;

@@ -8,6 +8,7 @@ class AudioManager {
     this.muted       = false;
     this._lastHorn   = 0;
     this._lastRush   = 0;
+    this._lastSiren  = 0;
     this._prevGrade  = null;
   }
 
@@ -185,6 +186,30 @@ class AudioManager {
     osc.start(t); osc.stop(t + 0.25);
   }
 
+  // Periodic wail while emergency vehicles are on the road
+  _maybeSiren(traffic) {
+    if (this.muted) return;
+    if (!traffic.cars.some(c => c.isEmergency && c.alive)) return;
+    const now = performance.now();
+    if (now - this._lastSiren < 2200) return;
+    this._lastSiren = now;
+    this._boot();
+    const ctx = this._ctx, t = ctx.currentTime;
+    const dur = 0.7;
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(700, t);
+    osc.frequency.linearRampToValueAtTime(1050, t + dur * 0.45);
+    osc.frequency.linearRampToValueAtTime(700,  t + dur);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.09, t + 0.06);
+    gain.gain.setValueAtTime(0.09, t + dur - 0.08);
+    gain.gain.linearRampToValueAtTime(0, t + dur);
+    osc.connect(gain); gain.connect(this._master);
+    osc.start(t); osc.stop(t + dur);
+  }
+
   // Call each frame from game loop — handles grade change sounds + horn + rush
   tick(traffic) {
     const grade = traffic.grade();
@@ -202,6 +227,7 @@ class AudioManager {
     this._wasRush = traffic.isRushHour;
 
     this.maybePlayHorn(traffic.cars);
+    this._maybeSiren(traffic);
     this.updateAmbient(traffic.pressure, traffic.cars.filter(c => c.alive).length);
   }
 }
