@@ -96,6 +96,14 @@ class Car {
       if (sameDir && other.t > this.t && (other.t - this.t) * edgeLen < MIN_GAP) { mustStop = true; break; }
     }
 
+    // Yield to emergency vehicles approaching from behind on the same edge
+    for (const other of allCars) {
+      if (other.id === this.id || !other.alive || !other.isEmergency || !other.edge) continue;
+      if (other.edge.id !== this.edge.id) continue;
+      const sameDir = other.path[other.pathIdx]?.id === targetNode.id;
+      if (sameDir && other.t < this.t && (this.t - other.t) * edgeLen < MIN_GAP * 3.5) { mustStop = true; break; }
+    }
+
     // Speed zone multiplier
     let speedMult = 1;
     for (const z of zones) {
@@ -125,6 +133,66 @@ class Car {
       if (this.pathIdx >= this.path.length) { this._spawn(); return; }
       this.edge = this._edgeBetween(this.path[this.pathIdx - 1], this.path[this.pathIdx]);
       if (!this.edge) this._spawn();
+    }
+  }
+}
+
+class EmergencyCar extends Car {
+  constructor(id, graph, type) {
+    super(id, graph);
+    this.emergencyType = type; // 'ambulance' | 'firetruck'
+    this.color         = type === 'ambulance' ? '#f0f0f0' : '#cc3333';
+    this.w = 14; this.h = 7;
+    this.maxSpeed    = CAR_SPEED * 1.4;
+    this.isEmergency = true;
+    this.sirenPhase  = 0;
+    this.missionTimer = 0;
+    this.penaltyGiven = false;
+    this.onComplete   = null;
+  }
+
+  // Override: ignore all traffic controls, ignore car-following, trigger onComplete at destination
+  update(dt, allCars, zones) {
+    if (!this.alive || !this.path || !this.edge) return;
+    this.sirenPhase += dt * 5;
+
+    const targetNode = this.path[this.pathIdx];
+    const prevNode   = this.path[this.pathIdx - 1];
+    const edgeLen    = this.edge.length || 1;
+
+    // Creep forward if literally bumping the car ahead; otherwise full speed
+    let mustStop = false;
+    for (const other of allCars) {
+      if (other.id === this.id || !other.alive || !other.edge) continue;
+      if (other.edge.id !== this.edge.id) continue;
+      const sameDir = other.path[other.pathIdx]?.id === targetNode.id;
+      if (sameDir && other.t > this.t && (other.t - this.t) * edgeLen < MIN_GAP * 0.55) { mustStop = true; break; }
+    }
+
+    const targetSpeed = mustStop ? this.maxSpeed * 0.22 : this.maxSpeed;
+    this.speed = lerp(this.speed, targetSpeed, Math.min(1, dt * 5));
+    if (this.speed < 2) this.stuckTime += dt;
+    else                this.stuckTime = 0;
+    if (this.opacity < 1) this.opacity = Math.min(1, this.opacity + dt * 3);
+
+    this.t += (this.speed * dt) / edgeLen;
+
+    const fwd  = this._forward();
+    const perp = { x: -fwd.y, y: fwd.x };
+    const prog = this.t * edgeLen;
+    this.x = prevNode.x + fwd.x * prog + perp.x * LANE_OFFSET;
+    this.y = prevNode.y + fwd.y * prog + perp.y * LANE_OFFSET;
+    this.angle = Math.atan2(fwd.y, fwd.x);
+
+    if (this.t >= 1) {
+      this.t = 0; this.pathIdx++;
+      if (this.pathIdx >= this.path.length) {
+        this.alive = false;
+        if (this.onComplete) this.onComplete(true);
+        return;
+      }
+      this.edge = this._edgeBetween(this.path[this.pathIdx - 1], this.path[this.pathIdx]);
+      if (!this.edge) { this.alive = false; if (this.onComplete) this.onComplete(false); }
     }
   }
 }

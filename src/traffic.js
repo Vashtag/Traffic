@@ -16,6 +16,9 @@ class TrafficManager {
     this._spawnTimer = 0;
     this._elapsed    = 0;
     this.isRushHour  = false;
+    this._emergencySpawnTimer = 0;
+    this._nextEmergencyIn     = 65 + Math.random() * 55; // first call in 65–120 s
+    this._emergencyEvents     = [];                       // consumed each frame by game.js
     this.smoothScore = 100;   // exponential moving average of flowScore
     this.pressure    = 0;     // 0 (calm) → 1 (gridlock), drives the pressure bar
     this._prevGrade  = 'A';
@@ -27,6 +30,7 @@ class TrafficManager {
     this._updateRushHour();
     this._updateLights(dt);
     this._spawnCars(dt);
+    this._updateEmergencies(dt);
     this._updateCars(dt);
     this._updateCongestion();
     this._updateScore(dt);
@@ -73,10 +77,43 @@ class TrafficManager {
     if (this._spawnTimer < interval) return;
     this._spawnTimer = 0;
     this.cars = this.cars.filter(c => c.alive);
+    const normalCount = this.cars.filter(c => !c.isEmergency).length;
     const target = this.isRushHour ? MAX_CARS : TARGET_CARS;
-    if (this.cars.length < target) {
+    if (normalCount < target) {
       const car = new Car(this._nextCarId++, this.graph);
       if (car.alive) this.cars.push(car);
+    }
+  }
+
+  _spawnEmergency() {
+    if (this.graph.allNodes().length < 2) return;
+    if (this.cars.filter(c => c.isEmergency && c.alive).length >= 2) return;
+    const type = Math.random() < 0.6 ? 'ambulance' : 'firetruck';
+    const ecar = new EmergencyCar(this._nextCarId++, this.graph, type);
+    if (!ecar.alive) return;
+    ecar.missionTimer = 50;
+    ecar.onComplete = (success) => {
+      if (success) this._emergencyEvents.push({ kind: 'complete', vehicleType: type });
+    };
+    this.cars.push(ecar);
+    this._emergencyEvents.push({ kind: 'spawned', vehicleType: type });
+  }
+
+  _updateEmergencies(dt) {
+    this._emergencySpawnTimer += dt;
+    if (this._emergencySpawnTimer >= this._nextEmergencyIn) {
+      this._emergencySpawnTimer = 0;
+      this._nextEmergencyIn = 65 + Math.random() * 55;
+      this._spawnEmergency();
+    }
+    for (const car of this.cars) {
+      if (!car.isEmergency || !car.alive || car.penaltyGiven) continue;
+      car.missionTimer -= dt;
+      if (car.missionTimer <= 0) {
+        car.penaltyGiven = true;
+        car.alive = false;
+        this._emergencyEvents.push({ kind: 'expired', vehicleType: car.emergencyType });
+      }
     }
   }
 
