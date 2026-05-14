@@ -71,6 +71,7 @@ body {
 
 #rushIndicator { color: #e74c3c; font-weight: 600; transition: opacity 0.5s; }
 #timeOfDay    { color: #aaa; opacity: 0.7; }
+#weatherIcon  { font-size: 15px; opacity: 0.85; transition: opacity 0.6s; }
 
 /* Toast notification */
 #toast {

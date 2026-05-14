@@ -25,13 +25,13 @@ class TrafficManager {
     this.gradeChanged = false;
   }
 
-  update(dt) {
+  update(dt, weatherMult = 1, icePatches = []) {
     this._elapsed += dt;
     this._updateRushHour();
     this._updateLights(dt);
     this._spawnCars(dt);
     this._updateEmergencies(dt);
-    this._updateCars(dt);
+    this._updateCars(dt, weatherMult, icePatches);
     this._updateCongestion();
     this._updateScore(dt);
   }
@@ -117,8 +117,8 @@ class TrafficManager {
     }
   }
 
-  _updateCars(dt) {
-    for (const car of this.cars) car.update(dt, this.cars, this.zones);
+  _updateCars(dt, weatherMult = 1, icePatches = []) {
+    for (const car of this.cars) car.update(dt, this.cars, this.zones, weatherMult, icePatches);
   }
 
   _updateCongestion() {

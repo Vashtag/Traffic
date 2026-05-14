@@ -64,7 +64,7 @@ class Car {
     return { x: dx / len, y: dy / len };
   }
 
-  update(dt, allCars, zones = []) {
+  update(dt, allCars, zones = [], weatherMult = 1, icePatches = []) {
     if (!this.alive || !this.path || !this.edge) return;
 
     const targetNode    = this.path[this.pathIdx];
@@ -73,19 +73,24 @@ class Car {
     const distRemaining = edgeLen * (1 - this.t);
     let mustStop = false;
 
-    // Stop sign
-    if (targetNode.control?.type === 'stop' && distRemaining < STOP_DISTANCE) {
-      if (this._stopNodeId !== targetNode.id) { this._stopNodeId = targetNode.id; this._stopTimer = STOP_HOLD; }
-      if (this._stopTimer > 0) { this._stopTimer -= dt; mustStop = true; }
-    }
-    // Traffic light
-    if (targetNode.control?.type === 'light' && targetNode.control.state === 'red' && distRemaining < STOP_DISTANCE) mustStop = true;
-    // Roundabout yield
-    if (targetNode.control?.type === 'roundabout' && distRemaining < STOP_DISTANCE * 1.5) {
-      for (const other of allCars) {
-        if (other.id === this.id || !other.alive || !other.edge) continue;
-        if (other.path[other.pathIdx]?.id !== targetNode.id || other.edge.id === this.edge.id) continue;
-        if (other.edge.length * (1 - other.t) < distRemaining - 5) { mustStop = true; break; }
+    // On ice: skip all traffic-control stops (car skids through)
+    const onIce = icePatches.some(p => dist({ x: this.x, y: this.y }, p) < p.radius);
+
+    if (!onIce) {
+      // Stop sign
+      if (targetNode.control?.type === 'stop' && distRemaining < STOP_DISTANCE) {
+        if (this._stopNodeId !== targetNode.id) { this._stopNodeId = targetNode.id; this._stopTimer = STOP_HOLD; }
+        if (this._stopTimer > 0) { this._stopTimer -= dt; mustStop = true; }
+      }
+      // Traffic light
+      if (targetNode.control?.type === 'light' && targetNode.control.state === 'red' && distRemaining < STOP_DISTANCE) mustStop = true;
+      // Roundabout yield
+      if (targetNode.control?.type === 'roundabout' && distRemaining < STOP_DISTANCE * 1.5) {
+        for (const other of allCars) {
+          if (other.id === this.id || !other.alive || !other.edge) continue;
+          if (other.path[other.pathIdx]?.id !== targetNode.id || other.edge.id === this.edge.id) continue;
+          if (other.edge.length * (1 - other.t) < distRemaining - 5) { mustStop = true; break; }
+        }
       }
     }
     // Car following
@@ -113,7 +118,7 @@ class Car {
       }
     }
 
-    const targetSpeed = mustStop ? 0 : this.maxSpeed * speedMult;
+    const targetSpeed = mustStop ? 0 : this.maxSpeed * speedMult * weatherMult;
     this.speed = lerp(this.speed, targetSpeed, Math.min(1, dt * 6));
     if (this.speed < 2) { this.waiting += dt; this.stuckTime += dt; }
     else                  this.stuckTime = 0;
@@ -151,8 +156,8 @@ class EmergencyCar extends Car {
     this.onComplete   = null;
   }
 
-  // Override: ignore all traffic controls, ignore car-following, trigger onComplete at destination
-  update(dt, allCars, zones) {
+  // Override: ignore all traffic controls, weather, and ice — trigger onComplete at destination
+  update(dt, allCars, zones, weatherMult, icePatches) {
     if (!this.alive || !this.path || !this.edge) return;
     this.sirenPhase += dt * 5;
 
