@@ -534,6 +534,75 @@ class Renderer {
     return { x: mx, y: my, w: MW, h: MH, toWorld };
   }
 
+  // World-space ice patches drawn on roads during snow
+  drawIcePatches(icePatches) {
+    if (!icePatches?.length) return;
+    const { ctx } = this;
+    const vb = this._viewBounds(40);
+    for (const p of icePatches) {
+      if (p.x < vb.left || p.x > vb.right || p.y < vb.top || p.y > vb.bottom) continue;
+      ctx.save();
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, p.radius, p.radius * 0.6, 0, 0, Math.PI * 2);
+      ctx.fillStyle   = 'rgba(180,225,255,0.38)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(150,210,255,0.65)'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // Screen-space weather overlay: rain/snow particles + fog/rain tint
+  drawWeather(weather, screenW, screenH) {
+    if (weather.state === 'clear') return;
+    const { ctx } = this;
+    const dpr = devicePixelRatio;
+
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // switch to screen space
+
+    // Rain/storm blue tint
+    const rainA = weather.rainTint();
+    if (rainA > 0) {
+      ctx.fillStyle = `rgba(40,65,130,${rainA})`;
+      ctx.fillRect(0, 0, screenW, screenH);
+    }
+
+    // Fog gradient overlay
+    const fogA = weather.fogAlpha();
+    if (fogA > 0) {
+      const grad = ctx.createLinearGradient(0, 0, 0, screenH);
+      grad.addColorStop(0, `rgba(195,200,215,${fogA})`);
+      grad.addColorStop(1, `rgba(175,182,200,${fogA * 0.75})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, screenW, screenH);
+    }
+
+    // Snow ambient tint
+    if (weather.state === 'snow') {
+      ctx.fillStyle = 'rgba(215,228,245,0.07)';
+      ctx.fillRect(0, 0, screenW, screenH);
+    }
+
+    // Particles
+    const isSnow = weather.state === 'snow';
+    for (const p of weather.particles) {
+      ctx.globalAlpha = p.alpha;
+      if (isSnow) {
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(220,235,255,1)'; ctx.fill();
+      } else {
+        // Rain streak
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + p.vx * 0.055, p.y + p.vy * 0.055);
+        ctx.strokeStyle = 'rgba(185,210,255,1)';
+        ctx.lineWidth = p.size;
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+  }
+
   drawZonePreview(pos, radius, type) {
     const { ctx } = this;
     const color = type === 'slow' ? '255,80,80' : '80,160,255';

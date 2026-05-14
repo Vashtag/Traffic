@@ -18,6 +18,7 @@ class Game {
     this.traffic  = new TrafficManager(this.graph);
     this.audio    = new AudioManager();
     this.heatmap  = new HeatmapManager();
+    this.weather  = new WeatherManager();
 
     this.budget       = 8000;
 
@@ -150,7 +151,8 @@ class Game {
     if (!this.paused) {
       this._elapsed += dt;
       this.budget   += this._incomeRate() * dt;
-      this.traffic.update(dt);
+      this.weather.update(dt, window.innerWidth, window.innerHeight, this.graph.allEdges());
+      this.traffic.update(dt, this.weather.speedMult(), this.weather.icePatches);
       this.audio.tick(this.traffic);
       this.heatmap.update(this.traffic.cars, dt);
 
@@ -180,6 +182,7 @@ class Game {
 
     this.renderer.drawBuildings(this.buildings);
     if (this.gridSnap) this.renderer.drawGrid(GRID);
+    this.renderer.drawIcePatches(this.weather.icePatches);
     this.renderer.drawZones(this.traffic.zones);
     this.renderer.drawEdges(this.graph.allEdges());
     this.renderer.drawNodes(this.graph.allNodes());
@@ -203,6 +206,9 @@ class Game {
     if (this.tool === 'zone') {
       this.renderer.drawZonePreview(this._mouseWorld, ZONE_RADIUS, this.zoneType);
     }
+
+    // Screen-space weather overlay (saves/restores transform internally)
+    this.renderer.drawWeather(this.weather, window.innerWidth, window.innerHeight);
 
     // Minimap drawn last so it's always on top (resets transform internally)
     this._minimapRect = this.renderer.drawMinimap(
@@ -252,6 +258,9 @@ class Game {
     const t = this.renderer.dayTime;
     document.getElementById('timeOfDay').textContent =
       t < 0.25 ? 'Night' : t < 0.35 ? 'Dawn' : t < 0.65 ? 'Day' : t < 0.80 ? 'Dusk' : 'Night';
+
+    // Weather
+    document.getElementById('weatherIcon').textContent = this.weather.icon();
 
     // Emergency indicator
     const emergencies = this.traffic.cars.filter(c => c.isEmergency && c.alive);
