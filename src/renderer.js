@@ -289,37 +289,90 @@ class Renderer {
   drawCars(cars) {
     const { ctx } = this;
     const vb = this._viewBounds(20);
+    const isNight = this.dayTime < 0.32 || this.dayTime > 0.78;
     for (const car of cars) {
       if (!car.alive) continue;
       if (car.x < vb.left || car.x > vb.right || car.y < vb.top || car.y > vb.bottom) continue;
       if (car.isEmergency) { this._drawEmergencyCar(car); continue; }
-      const W = car.w, H = car.h;
-      ctx.save();
-      ctx.globalAlpha = car.opacity ?? 1;
-      ctx.translate(car.x, car.y); ctx.rotate(car.angle);
-      ctx.fillStyle = 'rgba(0,0,0,0.3)';
-      ctx.beginPath(); ctx.ellipse(1, 1, W/2, H/2, 0, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = car.color;
-      ctx.beginPath(); ctx.roundRect(-W/2, -H/2, W, H, 2); ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.beginPath(); ctx.roundRect(-W/2+2, -H/2+1, W/2, H-2, 1); ctx.fill();
-      ctx.fillStyle = '#fffde7';
-      ctx.fillRect(W/2-2, -H/2+0.5, 2, 1.5);
-      ctx.fillRect(W/2-2,  H/2-2,   2, 1.5);
-      ctx.globalAlpha = 1;
-      ctx.restore();
+      this._drawCar(car, isNight);
     }
+  }
+
+  _drawCar(car, isNight) {
+    const { ctx } = this;
+    const W = car.w, H = car.h;
+    const angle = car.displayAngle ?? car.angle;
+
+    ctx.save();
+    ctx.globalAlpha = car.opacity ?? 1;
+    ctx.translate(car.x, car.y);
+    ctx.rotate(angle);
+
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.beginPath(); ctx.ellipse(0.5, 1, W * 0.52, H * 0.52, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Headlight beam cone (drawn under body so body covers the base)
+    if (isNight) {
+      const coneLen = 42, coneAng = Math.PI / 5.5;
+      const grad = ctx.createRadialGradient(W / 2, 0, 1, W / 2 + coneLen * 0.35, 0, coneLen);
+      grad.addColorStop(0, 'rgba(255,248,190,0.50)');
+      grad.addColorStop(1, 'rgba(255,248,190,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(W / 2, 0);
+      ctx.arc(W / 2, 0, coneLen, -coneAng, coneAng);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Main body
+    ctx.fillStyle = car.color;
+    ctx.beginPath(); ctx.roundRect(-W / 2, -H / 2, W, H, 2); ctx.fill();
+
+    // Hood — slightly darker front third
+    ctx.fillStyle = 'rgba(0,0,0,0.13)';
+    ctx.beginPath(); ctx.roundRect(W * 0.10, -H / 2, W * 0.40, H, [0, 2, 2, 0]); ctx.fill();
+
+    // Cabin glass — semi-transparent blue-gray rectangle
+    const cabX = -W * 0.22, cabW = W * 0.46, cabInset = H * 0.17;
+    ctx.fillStyle = 'rgba(130,185,230,0.42)';
+    ctx.beginPath(); ctx.roundRect(cabX, -H / 2 + cabInset, cabW, H - cabInset * 2, 1); ctx.fill();
+    // Windshield / rear window divider lines
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 0.6;
+    const divX = cabX + cabW * 0.48;
+    ctx.beginPath(); ctx.moveTo(divX, -H / 2 + cabInset); ctx.lineTo(divX, H / 2 - cabInset); ctx.stroke();
+
+    // Headlights (front corners)
+    ctx.fillStyle = isNight ? 'rgba(255,252,200,0.95)' : 'rgba(255,255,220,0.72)';
+    ctx.beginPath(); ctx.arc(W / 2 - 1.4, -H / 2 + 1.3, 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(W / 2 - 1.4,  H / 2 - 1.3, 1.5, 0, Math.PI * 2); ctx.fill();
+
+    // Tail lights — red + glow when braking
+    if (car.isBraking) {
+      ctx.shadowColor = '#e74c3c'; ctx.shadowBlur = 7;
+      ctx.fillStyle = '#e74c3c';
+    } else {
+      ctx.fillStyle = 'rgba(140,20,20,0.65)';
+    }
+    ctx.beginPath(); ctx.arc(-W / 2 + 1.4, -H / 2 + 1.3, 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(-W / 2 + 1.4,  H / 2 - 1.3, 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   _drawEmergencyCar(car) {
     const { ctx } = this;
     const W = car.w, H = car.h;
-    const sirenA = Math.sin(car.sirenPhase) > 0; // alternates true/false
+    const sirenA = Math.sin(car.sirenPhase) > 0;
 
     ctx.save();
     ctx.globalAlpha = car.opacity ?? 1;
     ctx.translate(car.x, car.y);
-    ctx.rotate(car.angle);
+    ctx.rotate(car.displayAngle ?? car.angle);
 
     // Drop shadow
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
