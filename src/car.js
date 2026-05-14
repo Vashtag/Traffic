@@ -5,34 +5,58 @@ const STOP_DISTANCE  = 26;
 const STOP_HOLD      = 2.2;
 const LANE_OFFSET    = 3;
 
-const CAR_PALETTE = [
-  '#e8e8e8','#f1c40f','#3498db','#e74c3c',
-  '#9b59b6','#1abc9c','#e67e22','#2ecc71',
-  '#c0392b','#2980b9','#f39c12','#8e44ad',
+// Four vehicle types with distinct sizes, speeds, and palettes
+const CAR_TYPES = [
+  {
+    name: 'compact', speedFactor: 1.12, wBase: 9,  hBase: 4.5,
+    palette: ['#f1c40f','#e74c3c','#3498db','#2ecc71','#e67e22','#ff6b6b','#4ecdc4','#a29bfe'],
+  },
+  {
+    name: 'sedan',   speedFactor: 1.00, wBase: 11, hBase: 5.0,
+    palette: ['#e8e8e8','#dfe6e9','#3498db','#95a5a6','#2c3e50','#b2bec3','#fdcb6e','#6c5ce7'],
+  },
+  {
+    name: 'suv',     speedFactor: 0.88, wBase: 13, hBase: 6.2,
+    palette: ['#2c3e50','#636e72','#c0392b','#1a1a2e','#27ae60','#2d3436','#74b9ff','#55efc4'],
+  },
+  {
+    name: 'truck',   speedFactor: 0.74, wBase: 16, hBase: 6.5,
+    palette: ['#7f8c8d','#e74c3c','#2c3e50','#d35400','#bdc3c7','#636e72','#e17055','#fab1a0'],
+  },
 ];
+// Weighted draw: compact×4, sedan×5, suv×3, truck×2
+const TYPE_POOL = [0,0,0,0, 1,1,1,1,1, 2,2,2, 3,3];
 
 class Car {
   constructor(id, graph) {
-    this.id       = id;
-    this.graph    = graph;
+    this.id    = id;
+    this.graph = graph;
     this.path     = null;
     this.pathIdx  = 0;
     this.edge     = null;
     this.t        = 0;
     this.x        = 0;
     this.y        = 0;
-    this.angle    = 0;
+    this.angle        = 0;
+    this.displayAngle = 0;  // lerped for smooth turns
     this.speed    = 0;
-    this.maxSpeed = CAR_SPEED + (Math.random() - 0.5) * SPEED_VARIANCE;
     this.waiting  = 0;
     this.alive    = true;
-    this.color    = CAR_PALETTE[Math.floor(Math.random() * CAR_PALETTE.length)];
-    this.w        = 10 + Math.random() * 3;
-    this.h        = 5  + Math.random() * 2;
+    this.isBraking   = false;
     this._stopTimer  = 0;
     this._stopNodeId = -1;
     this.stuckTime   = 0;
     this.opacity     = 0;
+
+    // Pick vehicle type
+    const typeIdx  = TYPE_POOL[Math.floor(Math.random() * TYPE_POOL.length)];
+    const type     = CAR_TYPES[typeIdx];
+    this.carType   = type.name;
+    this.w         = type.wBase + Math.random() * 2.5;
+    this.h         = type.hBase + Math.random() * 1.5;
+    this.maxSpeed  = (CAR_SPEED + (Math.random() - 0.5) * SPEED_VARIANCE) * type.speedFactor;
+    this.color     = type.palette[Math.floor(Math.random() * type.palette.length)];
+
     this._spawn();
   }
 
@@ -73,7 +97,6 @@ class Car {
     const distRemaining = edgeLen * (1 - this.t);
     let mustStop = false;
 
-    // On ice: skip all traffic-control stops (car skids through)
     const onIce = icePatches.some(p => dist({ x: this.x, y: this.y }, p) < p.radius);
 
     if (!onIce) {
@@ -93,15 +116,19 @@ class Car {
         }
       }
     }
-    // Car following
+
+    // Car following — proportional gap-based speed matching
     for (const other of allCars) {
       if (other.id === this.id || !other.alive || !other.edge) continue;
       if (other.edge.id !== this.edge.id) continue;
       const sameDir = other.path[other.pathIdx]?.id === targetNode.id;
-      if (sameDir && other.t > this.t && (other.t - this.t) * edgeLen < MIN_GAP) { mustStop = true; break; }
+      if (sameDir && other.t > this.t) {
+        const gap = (other.t - this.t) * edgeLen;
+        if (gap < MIN_GAP) { mustStop = true; break; }
+      }
     }
 
-    // Yield to emergency vehicles approaching from behind on the same edge
+    // Yield to approaching emergency vehicles
     for (const other of allCars) {
       if (other.id === this.id || !other.alive || !other.isEmergency || !other.edge) continue;
       if (other.edge.id !== this.edge.id) continue;
@@ -118,8 +145,21 @@ class Car {
       }
     }
 
-    const targetSpeed = mustStop ? 0 : this.maxSpeed * speedMult * weatherMult;
-    this.speed = lerp(this.speed, targetSpeed, Math.min(1, dt * 6));
+    // Smooth distance-proportional braking instead of binary stop
+    const fullSpeed = this.maxSpeed * speedMult * weatherMult;
+    let targetSpeed;
+    if (mustStop) {
+      const brakeDist = Math.max(STOP_DISTANCE, this.speed * 0.42 + 14);
+      targetSpeed = fullSpeed * clamp(distRemaining / brakeDist, 0, 1);
+    } else {
+      targetSpeed = fullSpeed;
+    }
+
+    this.isBraking = targetSpeed < this.speed * 0.6 && this.speed > 4;
+    // Brake faster than accelerate for realism
+    const lerpRate = targetSpeed < this.speed ? dt * 9 : dt * 3.5;
+    this.speed = lerp(this.speed, targetSpeed, Math.min(1, lerpRate));
+
     if (this.speed < 2) { this.waiting += dt; this.stuckTime += dt; }
     else                  this.stuckTime = 0;
     if (this.opacity < 1) this.opacity = Math.min(1, this.opacity + dt * 3);
@@ -133,6 +173,12 @@ class Car {
     this.y = prevNode.y + fwd.y * prog + perp.y * LANE_OFFSET;
     this.angle = Math.atan2(fwd.y, fwd.x);
 
+    // Smooth turn animation — lerp display angle avoiding wrap-around
+    let da = this.angle - this.displayAngle;
+    if (da >  Math.PI) da -= 2 * Math.PI;
+    if (da < -Math.PI) da += 2 * Math.PI;
+    this.displayAngle += da * Math.min(1, dt * 9);
+
     if (this.t >= 1) {
       this.t = 0; this.pathIdx++;
       if (this.pathIdx >= this.path.length) { this._spawn(); return; }
@@ -145,7 +191,7 @@ class Car {
 class EmergencyCar extends Car {
   constructor(id, graph, type) {
     super(id, graph);
-    this.emergencyType = type; // 'ambulance' | 'firetruck'
+    this.emergencyType = type;
     this.color         = type === 'ambulance' ? '#f0f0f0' : '#cc3333';
     this.w = 14; this.h = 7;
     this.maxSpeed    = CAR_SPEED * 1.4;
@@ -156,7 +202,6 @@ class EmergencyCar extends Car {
     this.onComplete   = null;
   }
 
-  // Override: ignore all traffic controls, weather, and ice — trigger onComplete at destination
   update(dt, allCars, zones, weatherMult, icePatches) {
     if (!this.alive || !this.path || !this.edge) return;
     this.sirenPhase += dt * 5;
@@ -165,7 +210,6 @@ class EmergencyCar extends Car {
     const prevNode   = this.path[this.pathIdx - 1];
     const edgeLen    = this.edge.length || 1;
 
-    // Creep forward if literally bumping the car ahead; otherwise full speed
     let mustStop = false;
     for (const other of allCars) {
       if (other.id === this.id || !other.alive || !other.edge) continue;
@@ -188,6 +232,11 @@ class EmergencyCar extends Car {
     this.x = prevNode.x + fwd.x * prog + perp.x * LANE_OFFSET;
     this.y = prevNode.y + fwd.y * prog + perp.y * LANE_OFFSET;
     this.angle = Math.atan2(fwd.y, fwd.x);
+
+    let da = this.angle - this.displayAngle;
+    if (da >  Math.PI) da -= 2 * Math.PI;
+    if (da < -Math.PI) da += 2 * Math.PI;
+    this.displayAngle += da * Math.min(1, dt * 9);
 
     if (this.t >= 1) {
       this.t = 0; this.pathIdx++;
